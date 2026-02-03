@@ -76,7 +76,7 @@ function App() {
         // 1. Find the school first
         const { data: school, error: schoolError } = await supabase
           .from('schools')
-          .select('id, is_active')
+          .select('id, name, is_active')
           .eq('school_code', schoolCode)
           .single()
 
@@ -94,7 +94,7 @@ function App() {
 
         const { data: userRecord, error: userError } = await supabase
           .from(tableName)
-          .select('*')
+          .select(role === 'student' ? '*, grades!grade_id(name)' : '*')
           .eq('school_id', school.id)
           .eq(codeColumn, personalCode)
           .single()
@@ -105,7 +105,7 @@ function App() {
         sessionUser = {
           ...userData,
           role: role,
-          schoolName: schoolCode
+          schoolName: school.name
         }
       }
 

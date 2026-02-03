@@ -86,7 +86,7 @@ function TeacherDashboard({ user, onLogout }) {
                 <header className="flex justify-between items-center mb-8 glass-card p-6 rounded-2xl">
                     <div>
                         <h1 className="text-2xl font-bold text-brand-primary border-r-4 border-brand-primary pr-4">لوحة المعلم والمدقق 🛡️</h1>
-                        <p className="text-slate-600">أهلاً بك، {user.name} | مدرسة {user.schoolName}</p>
+                        <p className="text-slate-600">أهلاً بك، {user.name} | {user.schoolName}</p>
                     </div>
                     <button
                         onClick={onLogout}

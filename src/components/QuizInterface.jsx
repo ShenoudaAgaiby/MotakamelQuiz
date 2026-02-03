@@ -9,6 +9,7 @@ function QuizInterface({ questions: legacyQuestions, competition, user, onComple
 
     const [currentIndex, setCurrentIndex] = useState(0)
     const [answers, setAnswers] = useState({})
+    const [isCorrected, setIsCorrected] = useState(false)
 
     // Timer Logic
     const getInitialTime = () => {
@@ -47,6 +48,7 @@ function QuizInterface({ questions: legacyQuestions, competition, user, onComple
         if (isCompetition && competition.timer_type === 'per_question') {
             setTimeLeft(competition.duration)
         }
+        setIsCorrected(false) // Reset correction for new question
     }, [currentIndex])
 
     //Typeset math on question change
@@ -60,6 +62,7 @@ function QuizInterface({ questions: legacyQuestions, competition, user, onComple
     const currentQuestion = questions[currentIndex]
 
     const handleSelectOption = (option) => {
+        if (isCorrected) return // Prevent changing answer after correction
         setAnswers({ ...answers, [currentIndex]: option })
     }
 
@@ -70,7 +73,7 @@ function QuizInterface({ questions: legacyQuestions, competition, user, onComple
         let score = 0
         questions.forEach((q, index) => {
             if (answers[index] === q.correct_answer) {
-                score++
+                score += (q.score || 1)
             }
         })
 
@@ -108,7 +111,8 @@ function QuizInterface({ questions: legacyQuestions, competition, user, onComple
     }
 
     if (isFinished) {
-        const score = questions.reduce((acc, q, i) => answers[i] === q.correct_answer ? acc + 1 : acc, 0)
+        const score = questions.reduce((acc, q, i) => answers[i] === q.correct_answer ? acc + (q.score || 1) : acc, 0)
+        const totalPoints = questions.reduce((acc, q) => acc + (q.score || 1), 0)
         return (
             <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
                 <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center shadow-2xl">
@@ -117,7 +121,7 @@ function QuizInterface({ questions: legacyQuestions, competition, user, onComple
                     <p className="text-slate-600 mb-6 font-bold">{isCompetition ? `لقد أكملت "${competition.title}"` : 'لقد أتممت التدريب بنجاح.'}</p>
                     <div className="bg-slate-50 rounded-2xl p-6 mb-8">
                         <div className="text-sm text-slate-500 mb-1">درجتك النهائية</div>
-                        <div className="text-4xl font-black text-brand-primary">{score} / {questions.length}</div>
+                        <div className="text-4xl font-black text-brand-primary">{score} / {totalPoints}</div>
                     </div>
                     <button
                         onClick={() => onComplete({ score, total: questions.length })}
@@ -141,7 +145,7 @@ function QuizInterface({ questions: legacyQuestions, competition, user, onComple
     return (
         <div className="fixed inset-0 bg-slate-50 flex flex-col z-50 overflow-y-auto ltr">
             {/* Header */}
-            <div className="bg-white border-b border-slate-200 p-4 sticky top-0 z-10">
+            <header className="bg-white border-b border-slate-200 p-4 sticky top-0 z-10 w-full">
                 <div className="max-w-3xl mx-auto flex justify-between items-center">
                     <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 p-2">
                         <span className="text-2xl">✕</span>
@@ -166,13 +170,25 @@ function QuizInterface({ questions: legacyQuestions, competition, user, onComple
                         style={{ width: `${progress}%` }}
                     ></div>
                 </div>
-            </div>
+            </header>
 
             {/* Content */}
             <main className="flex-1 max-w-3xl w-full mx-auto p-4 md:p-8 flex flex-col justify-center">
                 <div className="mb-10 text-center">
+                    <div className="flex justify-center gap-2 mb-4">
+                        <span className={`px-3 py-1 rounded-lg text-sm font-black border shadow-sm ${currentQuestion.difficulty === 'easy' ? 'bg-green-100 text-green-700 border-green-200' :
+                            currentQuestion.difficulty === 'medium' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                                currentQuestion.difficulty === 'hard' ? 'bg-rose-100 text-rose-700 border-rose-200' :
+                                    'bg-purple-100 text-purple-700 border-purple-200'
+                            }`}>
+                            الصعوبة: {currentQuestion.difficulty === 'easy' ? 'سهل' : currentQuestion.difficulty === 'medium' ? 'متوسط' : currentQuestion.difficulty === 'hard' ? 'صعب' : 'متفوقين'}
+                        </span>
+                        <span className="px-3 py-1 bg-slate-100 text-slate-700 rounded-lg text-sm font-black border border-slate-200 shadow-sm">
+                            الدرجة: {currentQuestion.score || 1}
+                        </span>
+                    </div>
                     {isCompetition && (
-                        <span className="inline-block px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-[10px] font-black mb-4 border border-amber-200 shadow-sm">
+                        <span className="inline-block px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-sm font-black mb-4 border border-amber-200 shadow-sm">
                             🏆 {competition.title}
                         </span>
                     )}
@@ -187,52 +203,81 @@ function QuizInterface({ questions: legacyQuestions, competition, user, onComple
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 mb-10 rtl">
-                    {currentQuestion.content?.options?.map((option, idx) => (
-                        <button
-                            key={idx}
-                            onClick={() => handleSelectOption(option)}
-                            className={`p-6 rounded-2xl border-2 text-right transition-all flex items-center gap-4 group ${answers[currentIndex] === option
-                                ? 'border-brand-primary bg-brand-primary/5 shadow-md ring-4 ring-brand-primary/10'
-                                : 'border-slate-100 bg-white hover:border-slate-200 hover:bg-slate-50'
-                                }`}
-                        >
-                            <span className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg transition-colors ${answers[currentIndex] === option
-                                ? 'bg-brand-primary text-white'
-                                : 'bg-slate-100 text-slate-400 group-hover:bg-slate-200'
-                                }`}>
-                                {idx + 1}
-                            </span>
-                            <span className={`flex-1 text-lg font-bold ${answers[currentIndex] === option ? 'text-brand-primary' : 'text-slate-700'}`}>
-                                {option}
-                            </span>
-                        </button>
-                    ))}
+                    {currentQuestion.content?.options?.map((option, idx) => {
+                        const isSelected = answers[currentIndex] === option
+                        const isCorrect = option === currentQuestion.correct_answer
+
+                        let displayStyle = 'border-slate-100 bg-white hover:border-slate-200 hover:bg-slate-50'
+                        let iconStyle = 'bg-slate-100 text-slate-400 group-hover:bg-slate-200'
+                        let textStyle = 'text-slate-700'
+
+                        if (isCorrected) {
+                            if (isCorrect) {
+                                displayStyle = 'border-green-500 bg-green-50 shadow-md ring-4 ring-green-100'
+                                iconStyle = 'bg-green-500 text-white'
+                                textStyle = 'text-green-700'
+                            } else if (isSelected) {
+                                displayStyle = 'border-red-500 bg-red-50 shadow-md ring-4 ring-red-100'
+                                iconStyle = 'bg-red-500 text-white'
+                                textStyle = 'text-red-700'
+                            } else {
+                                displayStyle = 'border-slate-100 bg-white opacity-50'
+                            }
+                        } else if (isSelected) {
+                            displayStyle = 'border-brand-primary bg-brand-primary/5 shadow-md ring-4 ring-brand-primary/10'
+                            iconStyle = 'bg-brand-primary text-white'
+                            textStyle = 'text-brand-primary'
+                        }
+
+                        return (
+                            <button
+                                key={idx}
+                                onClick={() => handleSelectOption(option)}
+                                className={`p-6 rounded-2xl border-2 text-right transition-all flex items-center gap-4 group ${displayStyle}`}
+                            >
+                                <span className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg transition-colors ${iconStyle}`}>
+                                    {isCorrected && isCorrect ? '✓' : idx + 1}
+                                </span>
+                                <span className={`flex-1 text-lg font-bold ${textStyle}`}>
+                                    {option}
+                                </span>
+                            </button>
+                        )
+                    })}
                 </div>
 
                 {/* Footer Controls */}
-                <div className="flex justify-between items-center mt-auto py-8">
-                    <button
-                        onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))}
-                        disabled={currentIndex === 0 || (isCompetition && competition.timer_type === 'per_question')}
-                        className="px-8 py-4 rounded-2xl border-2 border-slate-200 text-slate-600 font-black disabled:opacity-30 hover:bg-slate-100 transition-all"
-                    >
-                        السابق
-                    </button>
-                    {currentIndex === questions.length - 1 ? (
+                <div className="flex justify-center items-center mt-auto py-8">
+                    {!isCorrected ? (
                         <button
-                            onClick={handleSubmit}
-                            disabled={submitting}
+                            onClick={() => {
+                                if (answers[currentIndex] === undefined) {
+                                    alert('يرجى اختيار إجابة أولاً')
+                                    return
+                                }
+                                setIsCorrected(true)
+                            }}
                             className="px-12 py-4 bg-brand-primary text-white rounded-2xl font-black shadow-xl shadow-brand-primary/30 hover:scale-105 active:scale-95 transition-all text-lg"
                         >
-                            {submitting ? 'جاري الحفظ...' : 'إنهاء المسابقة ✨'}
+                            تصحيح
                         </button>
                     ) : (
-                        <button
-                            onClick={() => setCurrentIndex(prev => Math.min(questions.length - 1, prev + 1))}
-                            className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black hover:bg-black hover:scale-105 active:scale-95 transition-all text-lg"
-                        >
-                            التالي
-                        </button>
+                        currentIndex === questions.length - 1 ? (
+                            <button
+                                onClick={handleSubmit}
+                                disabled={submitting}
+                                className="px-12 py-4 bg-green-600 text-white rounded-2xl font-black shadow-xl shadow-green-600/30 hover:scale-105 active:scale-95 transition-all text-lg"
+                            >
+                                {submitting ? 'جاري الحفظ...' : 'إنهاء المسابقة ✨'}
+                            </button>
+                        ) : (
+                            <button
+                                onClick={() => setCurrentIndex(prev => prev + 1)}
+                                className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black hover:bg-black hover:scale-105 active:scale-95 transition-all text-lg"
+                            >
+                                التالي
+                            </button>
+                        )
                     )}
                 </div>
             </main>

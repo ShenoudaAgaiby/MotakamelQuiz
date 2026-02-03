@@ -18,7 +18,7 @@ function AdminDashboard({ user, onLogout }) {
     const [studentSearch, setStudentSearch] = useState('')
     const [allQuestions, setAllQuestions] = useState([])
     const [competitions, setCompetitions] = useState([])
-    const [qFilters, setQFilters] = useState({ school: '', grade: '', subject: '', difficulty: '', term: '' })
+    const [qFilters, setQFilters] = useState({ school: '', grade: '', subject: '', difficulty: '', term: '', week: '' })
 
     // Form States
     const [newSchool, setNewSchool] = useState({ name: '', school_code: '', page_link: '' })
@@ -58,6 +58,11 @@ function AdminDashboard({ user, onLogout }) {
     const [editingCompetition, setEditingCompetition] = useState(null)
     const [showResultsModal, setShowResultsModal] = useState(false)
     const [selectedCompetitionResults, setSelectedCompetitionResults] = useState(null)
+    const [polls, setPolls] = useState([])
+    const [newPoll, setNewPoll] = useState({ question: '', options: ['', ''], is_active: true, school_id: null })
+    const [pollResults, setPollResults] = useState({})
+    const [pollResponses, setPollResponses] = useState([])
+    const [showPollDetailsModal, setShowPollDetailsModal] = useState(null)
 
     // Hall of Fame (HOF) States
     const [hofMode, setHofMode] = useState('competition') // 'competition' or 'cumulative'
@@ -76,14 +81,30 @@ function AdminDashboard({ user, onLogout }) {
 
     // Helper to get available questions count based on current filters
     const getAvailableQuestions = (difficulty, config = newCompetition) => {
+        if (!config.grade_id || !config.subject_id) return 0;
+
         return allQuestions.filter(q => {
             const week = q.content?.week || 0;
-            return q.grade_id === config.grade_id &&
-                q.subject_id === config.subject_id &&
-                q.term === parseInt(config.term) &&
-                week >= parseInt(config.start_week) &&
-                week <= parseInt(config.end_week) &&
-                q.difficulty === difficulty;
+
+            // Normalize difficulty for comparison
+            let qDiff = q.difficulty;
+            let targetDiff = difficulty;
+            if (qDiff === 'متفوقين') qDiff = 'talented';
+            if (targetDiff === 'متفوقين') targetDiff = 'talented';
+
+            // Grade Match
+            const gradeId = q.grade_id || (typeof q.grades === 'object' ? q.grades?.id : q.grade);
+            const targetGradeId = config.grade_id;
+
+            // Subject Match
+            const subjectId = q.subject_id || (typeof q.subjects === 'object' ? q.subjects?.id : q.subject);
+            const targetSubjectId = config.subject_id;
+
+            return gradeId == targetGradeId &&
+                subjectId == targetSubjectId &&
+                parseInt(q.term) === parseInt(config.term) &&
+                (week == 0 || (week >= parseInt(config.start_week) && week <= parseInt(config.end_week))) &&
+                qDiff === targetDiff;
         }).length;
     };
 
@@ -177,6 +198,8 @@ function AdminDashboard({ user, onLogout }) {
             const { data: questionsData, error: e8 } = await supabase.from('questions').select('*, schools!school_id(name, school_code, page_link), subjects!fk_questions_subjects(master_subjects!master_subject_id(name)), grades!fk_questions_grades(name)').order('created_at', { ascending: false })
             const { data: competitionsData, error: e9 } = await supabase.from('competitions').select('*, grades(name), subjects(master_subjects!master_subject_id(name))').order('created_at', { ascending: false })
             const { data: resultsData, error: e10 } = await supabase.from('results').select('*, students!student_id(*, schools!school_id(name, school_code, page_link)), competitions!competition_id(*)').order('created_at', { ascending: false })
+            const { data: pollsData, error: ePolls } = await supabase.from('polls').select('*').order('created_at', { ascending: false })
+            const { data: responsesData, error: eResponses } = await supabase.from('poll_responses').select('*, students(name, schools(name))')
             const { data: configData, error: e11 } = await supabase.from('config').select('*')
 
             if (e1) console.error('Error in Schools (e1):', e1)
@@ -189,6 +212,8 @@ function AdminDashboard({ user, onLogout }) {
             if (e8) console.error('Error in Questions (e8):', e8)
             if (e9) console.error('Error in Competitions (e9):', e9)
             if (e10) console.error('Error in Results (e10):', e10)
+            if (ePolls) console.error('Error in Polls:', ePolls)
+            if (eResponses) console.error('Error in Responses:', eResponses)
 
             setSchools(schoolsData || [])
             setTeachers(teachersData || [])
@@ -200,6 +225,16 @@ function AdminDashboard({ user, onLogout }) {
             setAllQuestions(questionsData || [])
             setCompetitions(competitionsData || [])
             setAllResults(resultsData || [])
+            setPolls(pollsData || [])
+            setPollResponses(responsesData || [])
+
+            // Process poll results
+            const resultsMap = {}
+            responsesData?.forEach(resp => {
+                if (!resultsMap[resp.poll_id]) resultsMap[resp.poll_id] = {}
+                resultsMap[resp.poll_id][resp.option_index] = (resultsMap[resp.poll_id][resp.option_index] || 0) + 1
+            })
+            setPollResults(resultsMap)
 
             if (configData) {
                 const template = configData.find(c => c.key === 'whatsapp_template')
@@ -339,7 +374,9 @@ function AdminDashboard({ user, onLogout }) {
     const handleUpdateCompetition = async (e) => {
         e.preventDefault()
         try {
-            const { error } = await supabase.from('competitions').update(editingCompetition).eq('id', editingCompetition.id)
+            // Remove joined data before updating to avoid PostgREST "column not found" error
+            const { grades, subjects, ...updatePayload } = editingCompetition
+            const { error } = await supabase.from('competitions').update(updatePayload).eq('id', editingCompetition.id)
             if (error) throw error
             setEditingCompetition(null)
             fetchAllData()
@@ -351,6 +388,37 @@ function AdminDashboard({ user, onLogout }) {
         if (!confirm('هل أنت متأكد من حذف هذه المسابقة؟ سينتج عن ذلك حذف كافة النتائج المرتبطة بها.')) return
         try {
             const { error } = await supabase.from('competitions').delete().eq('id', id)
+            if (error) throw error
+            fetchAllData()
+        } catch (err) { alert('خطأ في الحذف: ' + err.message) }
+    }
+
+    const handleAddPoll = async (e) => {
+        e.preventDefault()
+        try {
+            const { error } = await supabase.from('polls').insert([{
+                ...newPoll,
+                options: newPoll.options.filter(opt => opt.trim() !== '')
+            }])
+            if (error) throw error
+            setNewPoll({ question: '', options: ['', ''], is_active: true, school_id: null })
+            fetchAllData()
+            alert('تم إنشاء التصويت بنجاح!')
+        } catch (err) { alert('خطأ في الإضافة: ' + err.message) }
+    }
+
+    const handleTogglePoll = async (poll) => {
+        try {
+            const { error } = await supabase.from('polls').update({ is_active: !poll.is_active }).eq('id', poll.id)
+            if (error) throw error
+            fetchAllData()
+        } catch (err) { alert('خطأ في التحديث: ' + err.message) }
+    }
+
+    const handleDeletePoll = async (id) => {
+        if (!confirm('هل أنت متأكد من حذف هذا التصويت؟')) return
+        try {
+            const { error } = await supabase.from('polls').delete().eq('id', id)
             if (error) throw error
             fetchAllData()
         } catch (err) { alert('خطأ في الحذف: ' + err.message) }
@@ -849,10 +917,13 @@ function AdminDashboard({ user, onLogout }) {
 
         const gradeMatch = !qFilters.grade || q.grade_id === qFilters.grade
         const subjectMatch = !qFilters.subject || q.subject_id === qFilters.subject
-        const difficultyMatch = !qFilters.difficulty || q.difficulty === qFilters.difficulty
+        const qDiff = q.difficulty === 'متفوقين' ? 'talented' : q.difficulty
+        const fDiff = qFilters.difficulty === 'متفوقين' ? 'talented' : qFilters.difficulty
+        const difficultyMatch = !qFilters.difficulty || qDiff === fDiff
         const termMatch = !qFilters.term || q.term === parseInt(qFilters.term)
+        const weekMatch = !qFilters.week || q.content?.week === parseInt(qFilters.week)
         const auditedMatch = !qFilters.audited || (qFilters.audited === 'true' ? q.is_audited === true : q.is_audited !== true)
-        return schoolMatch && gradeMatch && subjectMatch && difficultyMatch && termMatch && auditedMatch
+        return schoolMatch && gradeMatch && subjectMatch && difficultyMatch && termMatch && weekMatch && auditedMatch
     })
 
     // Update MathJax when questions table is displayed
@@ -879,14 +950,37 @@ function AdminDashboard({ user, onLogout }) {
             // 2. Competition Filter
             if (hofSelectedCompetition) {
                 pool = pool.filter(r => r.competition_id === hofSelectedCompetition)
-            } else if (pool.length > 0) {
-                // Default to most recent completion if nothing selected
-                // But usually we want them to select. Let's just filter.
             }
+
+            // Deduplicate: Keep only the best score per student for this competition
+            const processedResults = pool.reduce((acc, current) => {
+                const studentId = current.student_id;
+                if (!studentId) return acc;
+
+                if (!acc[studentId]) {
+                    acc[studentId] = current;
+                } else {
+                    const currentTime = current.time_spent || current.time_taken || 999999;
+                    const existingTime = acc[studentId].time_spent || acc[studentId].time_taken || 999999;
+
+                    const betterScore = current.score > acc[studentId].score;
+                    const sameScoreFaster = current.score === acc[studentId].score && currentTime < existingTime;
+
+                    if (betterScore || sameScoreFaster) {
+                        acc[studentId] = current;
+                    }
+                }
+                return acc;
+            }, {});
+
+            pool = Object.values(processedResults);
+
             // Sort by Score DESC, then Time Spent ASC
             pool.sort((a, b) => {
                 if (b.score !== a.score) return b.score - a.score;
-                return a.time_spent - b.time_spent;
+                const aTime = a.time_spent || a.time_taken || 999999;
+                const bTime = b.time_spent || b.time_taken || 999999;
+                return aTime - bTime;
             })
         } else {
             // Cumulative Logic: Group by Student
@@ -1245,6 +1339,12 @@ function AdminDashboard({ user, onLogout }) {
                         className={`w-full p-4 text-right rounded-xl font-bold transition-all flex items-center gap-3 ${activeTab === 'hall_of_fame' ? 'bg-brand-primary text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
                     >
                         <span>🎖️</span> لوحة الشرف
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('polls')}
+                        className={`w-full p-4 text-right rounded-xl font-bold transition-all flex items-center gap-3 ${activeTab === 'polls' ? 'bg-brand-primary text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                    >
+                        <span>📊</span> التصويتات
                     </button>
                     <button
                         onClick={() => setActiveTab('settings')}
@@ -1938,7 +2038,7 @@ function AdminDashboard({ user, onLogout }) {
                                 </div>
 
                                 {/* Filters */}
-                                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+                                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
                                     <select
                                         value={qFilters.grade}
                                         onChange={e => setQFilters({ ...qFilters, grade: e.target.value })}
@@ -1953,7 +2053,13 @@ function AdminDashboard({ user, onLogout }) {
                                         className="p-3 rounded-xl border border-slate-200 text-sm bg-white"
                                     >
                                         <option value="">كل المواد</option>
-                                        {subjects.map(s => <option key={s.id} value={s.id}>{s.master_subjects?.name}</option>)}
+                                        {subjects
+                                            .filter(s => !qFilters.grade || s.grade_id === qFilters.grade)
+                                            .map(s => (
+                                                <option key={s.id} value={s.id}>
+                                                    {s.master_subjects?.name} {!qFilters.grade && `- ${s.grades?.name}`}
+                                                </option>
+                                            ))}
                                     </select>
                                     <select
                                         value={qFilters.difficulty}
@@ -1964,7 +2070,7 @@ function AdminDashboard({ user, onLogout }) {
                                         <option value="easy">سهل</option>
                                         <option value="medium">متوسط</option>
                                         <option value="hard">صعب</option>
-                                        <option value="متفوقين">متفوقين</option>
+                                        <option value="talented">متفوقين</option>
                                     </select>
                                     <select
                                         value={qFilters.term}
@@ -1976,6 +2082,16 @@ function AdminDashboard({ user, onLogout }) {
                                         <option value="2">الترم الثاني</option>
                                     </select>
                                     <select
+                                        value={qFilters.week}
+                                        onChange={e => setQFilters({ ...qFilters, week: e.target.value })}
+                                        className="p-3 rounded-xl border border-slate-200 text-sm bg-white font-bold text-brand-primary"
+                                    >
+                                        <option value="">كل الأسابيع</option>
+                                        {[...Array(20)].map((_, i) => (
+                                            <option key={i + 1} value={i + 1}>الأسبوع {i + 1}</option>
+                                        ))}
+                                    </select>
+                                    <select
                                         value={qFilters.audited || ''}
                                         onChange={e => setQFilters({ ...qFilters, audited: e.target.value })}
                                         className="p-3 rounded-xl border border-slate-200 text-sm bg-white font-bold"
@@ -1984,6 +2100,55 @@ function AdminDashboard({ user, onLogout }) {
                                         <option value="true">مدققة فقط ✅</option>
                                         <option value="false">غير مدققة فقط ⚠️</option>
                                     </select>
+                                </div>
+
+                                {/* Analytical Statistics */}
+                                <div className="mb-8 animate-in fade-in slide-in-from-bottom duration-500">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <div className="h-6 w-1 bg-brand-primary rounded-full"></div>
+                                        <h4 className="font-black text-slate-700">إحصائيات تحليلية (حسب الفلتر) 📊</h4>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                                        <div className="glass-card p-4 rounded-2xl border-r-4 border-r-indigo-500 bg-indigo-50/30">
+                                            <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">عدد المسابقات</div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-2xl font-black text-indigo-600">
+                                                    {competitions.filter(c => {
+                                                        const gradeMatch = !qFilters.grade || c.grade_id === qFilters.grade
+                                                        const subjectMatch = !qFilters.subject || c.subject_id === qFilters.subject
+                                                        const termMatch = !qFilters.term || c.term === parseInt(qFilters.term)
+                                                        const weekMatch = !qFilters.week || (parseInt(qFilters.week) >= c.start_week && parseInt(qFilters.week) <= c.end_week)
+                                                        return gradeMatch && subjectMatch && termMatch && weekMatch
+                                                    }).length}
+                                                </span>
+                                                <span className="text-xs font-bold text-slate-500">مسابقة</span>
+                                            </div>
+                                        </div>
+                                        <div className="glass-card p-4 rounded-2xl border-r-4 border-r-green-500 bg-green-50/30">
+                                            <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">أسئلة سهلة</div>
+                                            <div className="text-2xl font-black text-green-600">
+                                                {filteredQuestions.filter(q => q.difficulty === 'easy').length}
+                                            </div>
+                                        </div>
+                                        <div className="glass-card p-4 rounded-2xl border-r-4 border-r-blue-500 bg-blue-50/30">
+                                            <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">أسئلة متوسطة</div>
+                                            <div className="text-2xl font-black text-blue-600">
+                                                {filteredQuestions.filter(q => q.difficulty === 'medium').length}
+                                            </div>
+                                        </div>
+                                        <div className="glass-card p-4 rounded-2xl border-r-4 border-r-rose-500 bg-rose-50/30">
+                                            <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">أسئلة صعبة</div>
+                                            <div className="text-2xl font-black text-rose-600">
+                                                {filteredQuestions.filter(q => q.difficulty === 'hard').length}
+                                            </div>
+                                        </div>
+                                        <div className="glass-card p-4 rounded-2xl border-r-4 border-r-purple-500 bg-purple-50/30">
+                                            <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">أسئلة متفوقين</div>
+                                            <div className="text-2xl font-black text-purple-600">
+                                                {filteredQuestions.filter(q => (q.difficulty === 'talented' || q.difficulty === 'متفوقين')).length}
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <div className="overflow-x-auto">
@@ -2046,16 +2211,16 @@ function AdminDashboard({ user, onLogout }) {
                             <div className="glass-card p-8 rounded-3xl shadow-sm border border-slate-200">
                                 <h3 className="text-xl font-bold mb-6 text-slate-800">إنشاء مسابقة جديدة 🏗️</h3>
                                 <form onSubmit={handleAddCompetition} className="space-y-6">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                        <div className="md:col-span-2 lg:col-span-1">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+                                        <div className="md:col-span-2 lg:col-span-2">
                                             <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">عنوان المسابقة</label>
                                             <input
-                                                type="text" placeholder="مثال: مسابقة العباقرة - الأسبوع الأول" required
+                                                type="text" placeholder="مثال: مسابقة العبافرة - الأسبوع الأول" required
                                                 value={newCompetition.title} onChange={e => setNewCompetition({ ...newCompetition, title: e.target.value })}
                                                 className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold"
                                             />
                                         </div>
-                                        <div>
+                                        <div className="lg:col-span-1">
                                             <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">الصف الدراسي</label>
                                             <select
                                                 required value={newCompetition.grade_id} onChange={e => setNewCompetition({ ...newCompetition, grade_id: e.target.value })}
@@ -2065,7 +2230,7 @@ function AdminDashboard({ user, onLogout }) {
                                                 {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                                             </select>
                                         </div>
-                                        <div>
+                                        <div className="lg:col-span-1">
                                             <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">المادة</label>
                                             <select
                                                 required value={newCompetition.subject_id} onChange={e => setNewCompetition({ ...newCompetition, subject_id: e.target.value })}
@@ -2077,32 +2242,32 @@ function AdminDashboard({ user, onLogout }) {
                                                 ))}
                                             </select>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <div>
-                                                <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">الترم</label>
-                                                <select
-                                                    value={newCompetition.term} onChange={e => setNewCompetition({ ...newCompetition, term: parseInt(e.target.value) })}
-                                                    className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
-                                                >
-                                                    <option value={1}>الترم 1</option>
-                                                    <option value={2}>الترم 2</option>
-                                                </select>
-                                            </div>
+                                        <div className="lg:col-span-1">
+                                            <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">الترم</label>
+                                            <select
+                                                value={newCompetition.term} onChange={e => setNewCompetition({ ...newCompetition, term: parseInt(e.target.value) })}
+                                                className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
+                                            >
+                                                <option value={1}>الترم 1</option>
+                                                <option value={2}>الترم 2</option>
+                                            </select>
+                                        </div>
+                                        <div className="lg:col-span-1">
                                             <div className="grid grid-cols-2 gap-2">
                                                 <div>
-                                                    <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">من الأسبوع</label>
+                                                    <label className="block text-[10px] font-bold text-slate-400 mb-2 mr-2">من أسبوع</label>
                                                     <input
                                                         type="number" min="1" max="20"
                                                         value={newCompetition.start_week} onChange={e => setNewCompetition({ ...newCompetition, start_week: parseInt(e.target.value) })}
-                                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
+                                                        className="w-full p-4 px-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
                                                     />
                                                 </div>
                                                 <div>
-                                                    <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">إلى الأسبوع</label>
+                                                    <label className="block text-[10px] font-bold text-slate-400 mb-2 mr-2">إلى أسبوع</label>
                                                     <input
                                                         type="number" min="1" max="20"
                                                         value={newCompetition.end_week} onChange={e => setNewCompetition({ ...newCompetition, end_week: parseInt(e.target.value) })}
-                                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
+                                                        className="w-full p-4 px-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
                                                     />
                                                 </div>
                                             </div>
@@ -2119,7 +2284,7 @@ function AdminDashboard({ user, onLogout }) {
                                                 { key: 'easy_q', label: 'سهل (Easy)', color: 'green', diff: 'easy' },
                                                 { key: 'medium_q', label: 'متوسط (Medium)', color: 'blue', diff: 'medium' },
                                                 { key: 'hard_q', label: 'صعب (Hard)', color: 'rose', diff: 'hard' },
-                                                { key: 'talented_q', label: 'متفوقين (Talented)', color: 'purple', diff: 'متفوقين' }
+                                                { key: 'talented_q', label: 'متفوقين (Talented)', color: 'purple', diff: 'talented' }
                                             ].map(item => {
                                                 const available = getAvailableQuestions(item.diff);
                                                 const requested = newCompetition[item.key];
@@ -2162,9 +2327,17 @@ function AdminDashboard({ user, onLogout }) {
                                                 </label>
                                                 <div className="mt-4">
                                                     <label className="block text-[10px] font-bold text-amber-600 mb-1 mr-1">
-                                                        {newCompetition.timer_type === 'total' ? 'المدة الكلية (بالثواني)' : 'وقت السؤال الواحد (بالثواني)'}
+                                                        {newCompetition.timer_type === 'total' ? 'المدة الكلية (بالدقائق)' : 'وقت السؤال الواحد (بالدقائق)'}
                                                     </label>
-                                                    <input type="number" value={newCompetition.duration} onChange={e => setNewCompetition({ ...newCompetition, duration: parseInt(e.target.value) })} className="w-full p-3 rounded-xl border border-amber-200 bg-white text-center font-bold text-amber-900" />
+                                                    <input
+                                                        type="number"
+                                                        value={Math.floor(newCompetition.duration / 60)}
+                                                        onChange={e => {
+                                                            const mins = parseInt(e.target.value) || 0;
+                                                            setNewCompetition({ ...newCompetition, duration: mins * 60 });
+                                                        }}
+                                                        className="w-full p-3 rounded-xl border border-amber-200 bg-white text-center font-bold text-amber-900"
+                                                    />
                                                 </div>
                                             </div>
                                         </div>
@@ -2243,7 +2416,7 @@ function AdminDashboard({ user, onLogout }) {
                                                     </td>
                                                     <td className="p-4">
                                                         <div className="text-[10px] font-bold text-slate-500">
-                                                            {comp.timer_type === 'total' ? '⏱️ وقت كلي:' : '⏱️ لكل سؤال:'} <span className="text-slate-800">{comp.duration}ث</span>
+                                                            {comp.timer_type === 'total' ? '⏱️ وقت كلي:' : '⏱️ لكل سؤال:'} <span className="text-slate-800">{comp.duration / 60}د</span>
                                                         </div>
                                                     </td>
                                                     <td className="p-4 text-center font-black text-slate-700">{comp.max_attempts}</td>
@@ -2352,6 +2525,7 @@ function AdminDashboard({ user, onLogout }) {
                                                 <th className="p-4">الصف - الفصل</th>
                                                 <th className="p-4 text-center">{hofMode === 'cumulative' ? 'إجمالي النقاط' : 'الدرجة'}</th>
                                                 {hofMode === 'competition' && <th className="p-4 text-center">الوقت المستغرق</th>}
+                                                {hofMode === 'cumulative' && <th className="p-4 text-center">عدد المحاولات</th>}
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100 bg-white">
@@ -2391,18 +2565,175 @@ function AdminDashboard({ user, onLogout }) {
                                                                 </div>
                                                             </td>
                                                         )}
+                                                        {hofMode === 'cumulative' && (
+                                                            <td className="p-4 text-center">
+                                                                <div className="text-sm font-bold text-slate-500">
+                                                                    {row.count} محاولة
+                                                                </div>
+                                                            </td>
+                                                        )}
                                                     </tr>
                                                 );
                                             })}
                                             {getHofLeaderboard().length === 0 && (
                                                 <tr>
-                                                    <td colSpan={hofMode === 'competition' ? 6 : 5} className="p-12 text-center text-slate-400 italic">
+                                                    <td colSpan={6} className="p-12 text-center text-slate-400 italic">
                                                         لا توجد بيانات متاحة حالياً للعرض.
                                                     </td>
                                                 </tr>
                                             )}
                                         </tbody>
                                     </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    {activeTab === 'polls' && (
+                        <div className="space-y-8 animate-in fade-in slide-in-from-right duration-300">
+                            <div className="glass-card p-8 rounded-3xl shadow-sm border border-slate-200 min-w-full">
+                                <h3 className="text-xl font-bold mb-6 text-slate-800">إنشاء تصويت جديد</h3>
+                                <form onSubmit={handleAddPoll} className="space-y-6">
+                                    <div className="grid grid-cols-1 gap-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-sm font-bold text-slate-500 mb-2 mr-1">توجيه التصويت لـ:</label>
+                                                <select
+                                                    value={newPoll.school_id || ''}
+                                                    onChange={e => setNewPoll({ ...newPoll, school_id: e.target.value || null })}
+                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right font-bold bg-white"
+                                                >
+                                                    <option value="">كافة المدارس (عام) 🌍</option>
+                                                    {schools.map(school => (
+                                                        <option key={school.id} value={school.id}>{school.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-bold text-slate-500 mb-2 mr-1">سؤال التصويت:</label>
+                                                <input
+                                                    type="text" placeholder="مثال: ما رأيك في صعوبة مسابقة هذا الأسبوع؟" required
+                                                    value={newPoll.question} onChange={e => setNewPoll({ ...newPoll, question: e.target.value })}
+                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right font-bold"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-3">
+                                            <label className="block text-sm font-bold text-slate-500 mr-1">خيارات التصويت:</label>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                {newPoll.options.map((option, idx) => (
+                                                    <div key={idx} className="flex gap-2">
+                                                        <input
+                                                            type="text" placeholder={`الخيار ${idx + 1}`} required
+                                                            value={option} onChange={e => {
+                                                                const next = [...newPoll.options]
+                                                                next[idx] = e.target.value
+                                                                setNewPoll({ ...newPoll, options: next })
+                                                            }}
+                                                            className="flex-1 p-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right"
+                                                        />
+                                                        {newPoll.options.length > 2 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setNewPoll({ ...newPoll, options: newPoll.options.filter((_, i) => i !== idx) })}
+                                                                className="p-3 text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                                                            >
+                                                                ✕
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setNewPoll({ ...newPoll, options: [...newPoll.options, ''] })}
+                                                    className="p-3 border-2 border-dashed border-slate-200 text-slate-400 rounded-xl font-bold hover:border-brand-primary hover:text-brand-primary transition-all"
+                                                >
+                                                    + إضافة خيار جديد
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <button type="submit" className="bg-slate-800 text-white rounded-xl font-bold hover:bg-brand-primary transition-all shadow-md py-4 mt-2">
+                                            نشر التصويت للطلاب
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+
+                            <div className="glass-card rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+                                <div className="p-6 bg-slate-50 border-b border-slate-200">
+                                    <h3 className="font-bold text-slate-700 text-lg">التصويتات الحالية والنتائج</h3>
+                                </div>
+                                <div className="divide-y divide-slate-100">
+                                    {polls.map(poll => {
+                                        const results = pollResults[poll.id] || {}
+                                        const totalVotes = Object.values(results).reduce((a, b) => a + b, 0)
+
+                                        return (
+                                            <div key={poll.id} className="p-8 hover:bg-slate-50 transition-all">
+                                                <div className="flex justify-between items-start mb-6">
+                                                    <div className="flex gap-3">
+                                                        <button
+                                                            onClick={() => handleDeletePoll(poll.id)}
+                                                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                                                            title="حذف"
+                                                        >
+                                                            🗑️
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setShowPollDetailsModal(poll)}
+                                                            className="p-2 text-slate-400 hover:text-brand-primary hover:bg-blue-50 rounded-xl transition-all"
+                                                            title="عرض تفاصيل المصوتين"
+                                                        >
+                                                            👁️
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleTogglePoll(poll)}
+                                                            className={`px-4 py-1 rounded-full text-xs font-bold transition-all ${poll.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}
+                                                        >
+                                                            {poll.is_active ? 'نشط الآن' : 'غير نشط'}
+                                                        </button>
+                                                    </div>
+                                                    <div className="text-right flex-1 px-4">
+                                                        <h4 className="font-black text-xl text-slate-800 mb-2">{poll.question}</h4>
+                                                        <div className="flex justify-end gap-3 text-xs font-bold">
+                                                            <span className="text-slate-400">تاريخ النشر: {new Date(poll.created_at).toLocaleDateString()}</span>
+                                                            <span className="text-slate-300">|</span>
+                                                            <span className="text-slate-400">إجمالي الأصوات: {totalVotes}</span>
+                                                            <span className="text-slate-300">|</span>
+                                                            <span className={poll.school_id ? "text-brand-primary" : "text-emerald-500"}>
+                                                                🎯 الموجه لـ: {poll.school_id ? (schools.find(s => s.id === poll.school_id)?.name || 'مدرسة غير معروفة') : 'كافة المدارس'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+                                                    {poll.options.map((opt, idx) => {
+                                                        const votes = results[idx] || 0
+                                                        const percent = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0
+                                                        return (
+                                                            <div key={idx} className="space-y-2">
+                                                                <div className="flex justify-between text-xs font-bold">
+                                                                    <span className="text-brand-primary">{percent}% ({votes} صوت)</span>
+                                                                    <span className="text-slate-600">{opt}</span>
+                                                                </div>
+                                                                <div className="h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                                                                    <div
+                                                                        className="h-full bg-brand-primary transition-all duration-1000"
+                                                                        style={{ width: `${percent}%` }}
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                    {polls.length === 0 && (
+                                        <div className="p-12 text-center text-slate-400 italic">لا توجد تصويتات مضافة حالياً.</div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -3220,8 +3551,8 @@ function AdminDashboard({ user, onLogout }) {
                                 </div>
 
                                 <form onSubmit={handleUpdateCompetition} className="space-y-6">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                        <div className="md:col-span-2 lg:col-span-1">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+                                        <div className="md:col-span-2 lg:col-span-2">
                                             <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">عنوان المسابقة</label>
                                             <input
                                                 type="text" placeholder="مثال: مسابقة العباقرة - الأسبوع الأول" required
@@ -3229,7 +3560,7 @@ function AdminDashboard({ user, onLogout }) {
                                                 className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold"
                                             />
                                         </div>
-                                        <div>
+                                        <div className="lg:col-span-1">
                                             <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">الصف الدراسي</label>
                                             <select
                                                 required value={editingCompetition.grade_id} onChange={e => setEditingCompetition({ ...editingCompetition, grade_id: e.target.value })}
@@ -3239,7 +3570,7 @@ function AdminDashboard({ user, onLogout }) {
                                                 {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                                             </select>
                                         </div>
-                                        <div>
+                                        <div className="lg:col-span-1">
                                             <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">المادة</label>
                                             <select
                                                 required value={editingCompetition.subject_id} onChange={e => setEditingCompetition({ ...editingCompetition, subject_id: e.target.value })}
@@ -3251,32 +3582,32 @@ function AdminDashboard({ user, onLogout }) {
                                                 ))}
                                             </select>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <div>
-                                                <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">الترم</label>
-                                                <select
-                                                    value={editingCompetition.term} onChange={e => setEditingCompetition({ ...editingCompetition, term: parseInt(e.target.value) })}
-                                                    className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
-                                                >
-                                                    <option value={1}>الترم 1</option>
-                                                    <option value={2}>الترم 2</option>
-                                                </select>
-                                            </div>
+                                        <div className="lg:col-span-1">
+                                            <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">الترم</label>
+                                            <select
+                                                value={editingCompetition.term} onChange={e => setEditingCompetition({ ...editingCompetition, term: parseInt(e.target.value) })}
+                                                className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
+                                            >
+                                                <option value={1}>الترم 1</option>
+                                                <option value={2}>الترم 2</option>
+                                            </select>
+                                        </div>
+                                        <div className="lg:col-span-1">
                                             <div className="grid grid-cols-2 gap-2">
                                                 <div>
-                                                    <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">من الأسبوع</label>
+                                                    <label className="block text-[10px] font-bold text-slate-400 mb-2 mr-2">من أسبوع</label>
                                                     <input
                                                         type="number" min="1" max="20"
                                                         value={editingCompetition.start_week} onChange={e => setEditingCompetition({ ...editingCompetition, start_week: parseInt(e.target.value) })}
-                                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
+                                                        className="w-full p-4 px-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
                                                     />
                                                 </div>
                                                 <div>
-                                                    <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">إلى الأسبوع</label>
+                                                    <label className="block text-[10px] font-bold text-slate-400 mb-2 mr-2">إلى أسبوع</label>
                                                     <input
                                                         type="number" min="1" max="20"
                                                         value={editingCompetition.end_week} onChange={e => setEditingCompetition({ ...editingCompetition, end_week: parseInt(e.target.value) })}
-                                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
+                                                        className="w-full p-4 px-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
                                                     />
                                                 </div>
                                             </div>
@@ -3293,7 +3624,7 @@ function AdminDashboard({ user, onLogout }) {
                                                 { key: 'easy_q', label: 'سهل (Easy)', color: 'green', diff: 'easy' },
                                                 { key: 'medium_q', label: 'متوسط (Medium)', color: 'blue', diff: 'medium' },
                                                 { key: 'hard_q', label: 'صعب (Hard)', color: 'rose', diff: 'hard' },
-                                                { key: 'talented_q', label: 'متفوقين (Talented)', color: 'purple', diff: 'متفوقين' }
+                                                { key: 'talented_q', label: 'متفوقين (Talented)', color: 'purple', diff: 'talented' }
                                             ].map(item => {
                                                 const available = getAvailableQuestions(item.diff, editingCompetition);
                                                 const requested = editingCompetition[item.key];
@@ -3336,9 +3667,17 @@ function AdminDashboard({ user, onLogout }) {
                                                 </label>
                                                 <div className="mt-4">
                                                     <label className="block text-[10px] font-bold text-amber-600 mb-1 mr-1">
-                                                        {editingCompetition.timer_type === 'total' ? 'المدة الكلية (بالثواني)' : 'وقت السؤال الواحد (بالثواني)'}
+                                                        {editingCompetition.timer_type === 'total' ? 'المدة الكلية (بالدقائق)' : 'وقت السؤال الواحد (بالدقائق)'}
                                                     </label>
-                                                    <input type="number" value={editingCompetition.duration} onChange={e => setEditingCompetition({ ...editingCompetition, duration: parseInt(e.target.value) })} className="w-full p-3 rounded-xl border border-amber-200 bg-white text-center font-bold text-amber-900" />
+                                                    <input
+                                                        type="number"
+                                                        value={Math.floor(editingCompetition.duration / 60)}
+                                                        onChange={e => {
+                                                            const mins = parseInt(e.target.value) || 0;
+                                                            setEditingCompetition({ ...editingCompetition, duration: mins * 60 });
+                                                        }}
+                                                        className="w-full p-3 rounded-xl border border-amber-200 bg-white text-center font-bold text-amber-900"
+                                                    />
                                                 </div>
                                             </div>
                                         </div>
@@ -3525,6 +3864,60 @@ function AdminDashboard({ user, onLogout }) {
                                         </table>
                                     </div>
                                 )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+                {/* Poll Details Modal */}
+                {showPollDetailsModal && (
+                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto">
+                        <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-4xl p-8 animate-in zoom-in duration-300 relative max-h-[90vh] flex flex-col">
+                            <button
+                                onClick={() => setShowPollDetailsModal(null)}
+                                className="absolute top-6 left-6 text-slate-400 hover:text-slate-600 transition-all text-xl"
+                            >
+                                ✕
+                            </button>
+
+                            <div className="mb-6 text-right">
+                                <h2 className="text-2xl font-black text-slate-800 mb-2">{showPollDetailsModal.question}</h2>
+                                <p className="text-slate-500 font-bold">تفاصيل الطلاب الذين قاموا بالتصويت</p>
+                            </div>
+
+                            <div className="overflow-y-auto flex-1 pr-2">
+                                <table className="w-full text-right">
+                                    <thead className="sticky top-0 bg-white z-10 border-b-2 border-slate-100">
+                                        <tr className="text-slate-400 text-xs font-black uppercase tracking-wider">
+                                            <th className="p-4">اسم الطالب</th>
+                                            <th className="p-4">المدرسة</th>
+                                            <th className="p-4">الاختيار</th>
+                                            <th className="p-4">وقت التصويت</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50">
+                                        {pollResponses
+                                            .filter(r => r.poll_id === showPollDetailsModal.id)
+                                            .map((resp, i) => (
+                                                <tr key={i} className="hover:bg-slate-50 transition-all">
+                                                    <td className="p-4 font-bold text-slate-700">{resp.students?.name || 'طالب غير معروف'}</td>
+                                                    <td className="p-4 text-xs text-slate-500">{resp.students?.schools?.name || '---'}</td>
+                                                    <td className="p-4">
+                                                        <span className="px-3 py-1 bg-brand-primary/10 text-brand-primary rounded-lg font-black text-xs">
+                                                            {showPollDetailsModal.options[resp.option_index]}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-4 text-xs text-slate-400 font-mono">
+                                                        {new Date(resp.created_at).toLocaleString('ar-EG')}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        {pollResponses.filter(r => r.poll_id === showPollDetailsModal.id).length === 0 && (
+                                            <tr>
+                                                <td colSpan="4" className="p-12 text-center text-slate-400 italic">لا توجد ردود مسجلة لهذا التصويت بعد.</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
