@@ -154,8 +154,13 @@ function App() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
       {view === 'landing' && (
-        <div className="max-w-md w-full glass-card rounded-3xl p-8 text-center animate-in fade-in zoom-in duration-500">
-          <h1 className="text-4xl font-bold text-brand-primary mb-2">منصة متكامل</h1>
+        <div className="max-w-md w-full glass-card rounded-3xl p-8 text-center animate-in fade-in zoom-in duration-500 relative">
+          <h1
+            onClick={() => setView('login-admin')}
+            className="text-4xl font-bold text-brand-primary mb-2 cursor-default select-none"
+          >
+            منصة متكامل
+          </h1>
           <p className="text-slate-600 mb-8 text-lg">نظام المسابقات والتقييم الذكي</p>
 
           <div className="grid gap-4">
@@ -177,40 +182,6 @@ function App() {
               بوابة المعلمين 👨‍🏫
             </button>
 
-            <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-slate-100">
-
-
-              <button
-                onClick={() => setView('login-admin')}
-                className="text-slate-400 hover:text-brand-primary text-sm font-bold transition-all"
-              >
-                الدخول كإدارة بالنظام ⚙️
-              </button>
-              <div className="flex gap-2">
-
-
-                <button
-                  onClick={() => {
-                    setUser({ id: 'demo', name: 'أحمد محمد', role: 'student', schoolName: 'القدس الدولية' })
-                    setView('student-dashboard')
-                  }}
-                  className="flex-1 py-2 text-xs bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 transition-all cursor-pointer"
-                >
-                  تصفح كطالب (تخطي)
-                </button>
-
-
-                <button
-                  onClick={() => {
-                    setUser({ id: 'demo', name: 'إبراهيم حسن', role: 'teacher', schoolName: 'منارة المستقبل' })
-                    setView('teacher-dashboard')
-                  }}
-                  className="flex-1 py-2 text-xs bg-slate-100 text-slate-500 rounded-lg hover:bg-slate-200 transition-all cursor-pointer"
-                >
-                  تصفح كمعلم (تخطي)
-                </button>
-              </div>
-            </div>
           </div>
 
           <div className="mt-8 text-slate-400 text-sm">
