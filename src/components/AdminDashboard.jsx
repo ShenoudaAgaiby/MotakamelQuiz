@@ -116,9 +116,6 @@ function AdminDashboard({ user, onLogout }) {
     // State for Question Preview
     const [previewQuestion, setPreviewQuestion] = useState(null)
 
-    // Audit Scores State
-    const [scoreMismatches, setScoreMismatches] = useState([])
-    const [showAuditScoresModal, setShowAuditScoresModal] = useState(false)
 
     useEffect(() => {
         if (previewQuestion) {
@@ -680,113 +677,6 @@ function AdminDashboard({ user, onLogout }) {
         }
     }
 
-    // --- Score Audit Functions ---
-
-    const getExpectedScore = (difficulty) => {
-        switch (difficulty) {
-            case 'easy': return 1;
-            case 'medium': return 2;
-            case 'hard': return 3;
-            case 'talented': return 4;
-            case 'high_achievers': return 4;
-            default: return 2;
-        }
-    }
-
-    const handleAuditScores = () => {
-        const mismatches = allQuestions.filter(q => {
-            const hasScore = q.content && typeof q.content.score === 'number';
-            if (!hasScore) return true; // Treat missing score as mismatch
-
-            const validDifficulties = ['easy', 'medium', 'hard', 'talented', 'high_achievers'];
-            // If difficulty is invalid, we might want to flag it too, but let's focus on score.
-            // Map legacy or weird difficulties if needed, but assuming valid data mostly.
-
-            let difficulty = q.difficulty;
-            // Normalize just in case
-            if (difficulty === 'متفوقين') difficulty = 'talented';
-
-            const expected = getExpectedScore(difficulty);
-            return q.content.score !== expected;
-        }).map(q => ({
-            ...q,
-            expectedScore: getExpectedScore(q.difficulty === 'متفوقين' ? 'talented' : q.difficulty)
-        }));
-
-        setScoreMismatches(mismatches);
-        setShowAuditScoresModal(true);
-    };
-
-    const correctScoreMismatch = async (question) => {
-        try {
-            // 1. Calculate new score
-            let difficulty = question.difficulty;
-            if (difficulty === 'متفوقين') difficulty = 'talented';
-            const newScore = getExpectedScore(difficulty);
-
-            // 2. Prepare update
-            const newContent = {
-                ...question.content,
-                score: newScore
-            };
-
-            // 3. Send to Supabase
-            const { error } = await supabase
-                .from('questions')
-                .update({ content: newContent })
-                .eq('id', question.id);
-
-            if (error) throw error;
-
-            // 4. Update local state (remove from list)
-            setScoreMismatches(prev => prev.filter(q => q.id !== question.id));
-
-            // 5. Update main questions list locally for immediate feedback
-            setAllQuestions(prev => prev.map(q => q.id === question.id ? { ...q, content: newContent } : q));
-
-        } catch (err) {
-            alert('خطأ في تصحيح السؤال: ' + err.message);
-        }
-    };
-
-    const correctAllScoreMismatches = async () => {
-        if (!confirm(`سيتم تعديل ${scoreMismatches.length} سؤال تلقائياً. هل أنت متأكد؟`)) return;
-
-        setLoading(true); // Show global loading if possible, or local
-        let successCount = 0;
-        let errors = [];
-
-        // Loop and process (Batching would be better but simple loop is safer for logic)
-        for (const q of scoreMismatches) {
-            try {
-                let difficulty = q.difficulty;
-                if (difficulty === 'متفوقين') difficulty = 'talented';
-                const newScore = getExpectedScore(difficulty);
-                const newContent = { ...q.content, score: newScore };
-
-                const { error } = await supabase
-                    .from('questions')
-                    .update({ content: newContent })
-                    .eq('id', q.id);
-
-                if (error) throw error;
-                successCount++;
-            } catch (err) {
-                errors.push(q.id);
-                console.error('Failed to update question', q.id, err);
-            }
-        }
-
-        alert(`تم تصحيح ${successCount} سؤال بنجاح.` + (errors.length > 0 ? ` فشل ${errors.length} سؤال.` : ''));
-
-        // Refresh all data to be sure
-        await fetchAllData();
-
-        setScoreMismatches([]); // Clear list (or re-run audit?)
-        handleAuditScores(); // Re-audit to check if any remain
-        if (scoreMismatches.length === 0) setShowAuditScoresModal(false);
-        setLoading(false);
-    };
 
     const handleUpdateTeacher = async (e) => {
         e.preventDefault()
@@ -1992,13 +1882,6 @@ function AdminDashboard({ user, onLogout }) {
                                     <h3 className="text-xl font-bold text-slate-800">إدارة الأسئلة العالمية</h3>
                                     <div className="flex gap-3">
                                         <button
-                                            onClick={handleAuditScores}
-                                            className="flex items-center gap-2 px-4 py-2 bg-amber-50 text-amber-600 rounded-xl hover:bg-amber-100 transition-colors font-bold text-sm"
-                                        >
-                                            <span>⚖️</span>
-                                            <span>تدقيق الدرجات</span>
-                                        </button>
-                                        <button
                                             onClick={downloadQuestionTemplate}
                                             className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-600 rounded-xl hover:bg-green-100 transition-colors font-bold text-sm"
                                         >
@@ -2014,1916 +1897,2151 @@ function AdminDashboard({ user, onLogout }) {
                                         </button>
                                     </div>
                                 </div>
-
-                                {/* Statistics Cards */}
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                                    <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-4 text-white shadow-lg">
-                                        <div className="text-sm opacity-90 mb-1">إجمالي الأسئلة</div>
-                                        <div className="text-3xl font-black">{allQuestions.length}</div>
-                                    </div>
-                                    <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-2xl p-4 text-white shadow-lg">
-                                        <div className="text-sm opacity-90 mb-1">أسئلة مدققة ✅</div>
-                                        <div className="text-3xl font-black">{allQuestions.filter(q => q.is_audited).length}</div>
-                                    </div>
-                                    <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-2xl p-4 text-white shadow-lg">
-                                        <div className="text-sm opacity-90 mb-1">غير مدققة ⚠️</div>
-                                        <div className="text-3xl font-black">{allQuestions.filter(q => !q.is_audited).length}</div>
-                                    </div>
-                                    <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl p-4 text-white shadow-lg">
-                                        <div className="text-sm opacity-90 mb-1">نسبة التدقيق</div>
-                                        <div className="text-3xl font-black">
-                                            {allQuestions.length > 0 ? Math.round((allQuestions.filter(q => q.is_audited).length / allQuestions.length) * 100) : 0}%
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Filters */}
-                                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-                                    <select
-                                        value={qFilters.grade}
-                                        onChange={e => setQFilters({ ...qFilters, grade: e.target.value })}
-                                        className="p-3 rounded-xl border border-slate-200 text-sm bg-white"
-                                    >
-                                        <option value="">كل الصفوف</option>
-                                        {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                                    </select>
-                                    <select
-                                        value={qFilters.subject}
-                                        onChange={e => setQFilters({ ...qFilters, subject: e.target.value })}
-                                        className="p-3 rounded-xl border border-slate-200 text-sm bg-white"
-                                    >
-                                        <option value="">كل المواد</option>
-                                        {subjects
-                                            .filter(s => !qFilters.grade || s.grade_id === qFilters.grade)
-                                            .map(s => (
-                                                <option key={s.id} value={s.id}>
-                                                    {s.master_subjects?.name} {!qFilters.grade && `- ${s.grades?.name}`}
-                                                </option>
-                                            ))}
-                                    </select>
-                                    <select
-                                        value={qFilters.difficulty}
-                                        onChange={e => setQFilters({ ...qFilters, difficulty: e.target.value })}
-                                        className="p-3 rounded-xl border border-slate-200 text-sm bg-white"
-                                    >
-                                        <option value="">كل المستويات</option>
-                                        <option value="easy">سهل</option>
-                                        <option value="medium">متوسط</option>
-                                        <option value="hard">صعب</option>
-                                        <option value="talented">متفوقين</option>
-                                    </select>
-                                    <select
-                                        value={qFilters.term}
-                                        onChange={e => setQFilters({ ...qFilters, term: e.target.value })}
-                                        className="p-3 rounded-xl border border-slate-200 text-sm bg-white"
-                                    >
-                                        <option value="">كل الأترام</option>
-                                        <option value="1">الترم الأول</option>
-                                        <option value="2">الترم الثاني</option>
-                                    </select>
-                                    <select
-                                        value={qFilters.week}
-                                        onChange={e => setQFilters({ ...qFilters, week: e.target.value })}
-                                        className="p-3 rounded-xl border border-slate-200 text-sm bg-white font-bold text-brand-primary"
-                                    >
-                                        <option value="">كل الأسابيع</option>
-                                        {[...Array(20)].map((_, i) => (
-                                            <option key={i + 1} value={i + 1}>الأسبوع {i + 1}</option>
-                                        ))}
-                                    </select>
-                                    <select
-                                        value={qFilters.audited || ''}
-                                        onChange={e => setQFilters({ ...qFilters, audited: e.target.value })}
-                                        className="p-3 rounded-xl border border-slate-200 text-sm bg-white font-bold"
-                                    >
-                                        <option value="">كل الأسئلة</option>
-                                        <option value="true">مدققة فقط ✅</option>
-                                        <option value="false">غير مدققة فقط ⚠️</option>
-                                    </select>
-                                </div>
-
-                                {/* Analytical Statistics */}
-                                <div className="mb-8 animate-in fade-in slide-in-from-bottom duration-500">
-                                    <div className="flex items-center gap-2 mb-4">
-                                        <div className="h-6 w-1 bg-brand-primary rounded-full"></div>
-                                        <h4 className="font-black text-slate-700">إحصائيات تحليلية (حسب الفلتر) 📊</h4>
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                                        <div className="glass-card p-4 rounded-2xl border-r-4 border-r-indigo-500 bg-indigo-50/30">
-                                            <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">عدد المسابقات</div>
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-2xl font-black text-indigo-600">
-                                                    {competitions.filter(c => {
-                                                        const gradeMatch = !qFilters.grade || c.grade_id === qFilters.grade
-                                                        const subjectMatch = !qFilters.subject || c.subject_id === qFilters.subject
-                                                        const termMatch = !qFilters.term || c.term === parseInt(qFilters.term)
-                                                        const weekMatch = !qFilters.week || (parseInt(qFilters.week) >= c.start_week && parseInt(qFilters.week) <= c.end_week)
-                                                        return gradeMatch && subjectMatch && termMatch && weekMatch
-                                                    }).length}
-                                                </span>
-                                                <span className="text-xs font-bold text-slate-500">مسابقة</span>
-                                            </div>
-                                        </div>
-                                        <div className="glass-card p-4 rounded-2xl border-r-4 border-r-green-500 bg-green-50/30">
-                                            <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">أسئلة سهلة</div>
-                                            <div className="text-2xl font-black text-green-600">
-                                                {filteredQuestions.filter(q => q.difficulty === 'easy').length}
-                                            </div>
-                                        </div>
-                                        <div className="glass-card p-4 rounded-2xl border-r-4 border-r-blue-500 bg-blue-50/30">
-                                            <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">أسئلة متوسطة</div>
-                                            <div className="text-2xl font-black text-blue-600">
-                                                {filteredQuestions.filter(q => q.difficulty === 'medium').length}
-                                            </div>
-                                        </div>
-                                        <div className="glass-card p-4 rounded-2xl border-r-4 border-r-rose-500 bg-rose-50/30">
-                                            <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">أسئلة صعبة</div>
-                                            <div className="text-2xl font-black text-rose-600">
-                                                {filteredQuestions.filter(q => q.difficulty === 'hard').length}
-                                            </div>
-                                        </div>
-                                        <div className="glass-card p-4 rounded-2xl border-r-4 border-r-purple-500 bg-purple-50/30">
-                                            <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">أسئلة متفوقين</div>
-                                            <div className="text-2xl font-black text-purple-600">
-                                                {filteredQuestions.filter(q => (q.difficulty === 'talented' || q.difficulty === 'متفوقين')).length}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-right text-sm">
-                                        <thead className="bg-slate-50 text-slate-400 font-bold border-b">
-                                            <tr>
-                                                <th className="p-4">نص السؤال</th>
-                                                <th className="p-4">المادة/الصف</th>
-                                                <th className="p-4">المستوى</th>
-                                                <th className="p-4 text-center">حالة التدقيق</th>
-                                                <th className="p-4 text-center">الإجراءات</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                            {filteredQuestions.map(q => (
-                                                <tr key={q.id} className="hover:bg-slate-50 transition-colors">
-                                                    <td className="p-4 max-w-xs truncate font-bold text-slate-700" dangerouslySetInnerHTML={{ __html: convertMathToLatex(q.content?.question || '---') }}></td>
-                                                    <td className="p-4 text-xs text-slate-500">
-                                                        {q.subjects?.master_subjects?.name || '---'} <br />
-                                                        <span className="text-[10px] opacity-70">{q.grades?.name || '---'} - الترم {q.term}</span>
-                                                    </td>
-                                                    <td className="p-4">
-                                                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${q.difficulty === 'easy' ? 'bg-green-100 text-green-700' :
-                                                            q.difficulty === 'medium' ? 'bg-blue-100 text-blue-700' :
-                                                                q.difficulty === 'hard' ? 'bg-rose-100 text-rose-700' : 'bg-purple-100 text-purple-700'
-                                                            }`}>
-                                                            {q.difficulty === 'easy' ? 'سهل' : q.difficulty === 'medium' ? 'متوسط' : q.difficulty === 'hard' ? 'صعب' : 'متفوقين'}
-                                                        </span>
-                                                    </td>
-                                                    <td className="p-4 text-center">
-                                                        <span className={`px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1 ${q.is_audited ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-                                                            }`}>
-                                                            {q.is_audited ? '✅ مدقق' : '⚠️ غير مدقق'}
-                                                        </span>
-                                                    </td>
-                                                    <td className="p-4">
-                                                        <div className="flex justify-center gap-2">
-                                                            <button onClick={() => setPreviewQuestion(q)} className="p-1 hover:bg-blue-50 text-blue-500 rounded" title="معاينة">👁️</button>
-                                                            <button onClick={() => setEditingQuestion(q)} className="p-1 hover:bg-slate-200 rounded" title="تعديل">📝</button>
-                                                            <button onClick={() => handleDeleteQuestion(q.id)} className="p-1 hover:bg-red-50 text-red-500 rounded" title="حذف">🗑️</button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                            {filteredQuestions.length === 0 && (
-                                                <tr>
-                                                    <td colSpan="5" className="p-12 text-center text-slate-400 italic">لا توجد أسئلة تطابق هذه الفلاتر</td>
-                                                </tr>
-                                            )}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {activeTab === 'competitions' && (
-                        <div className="space-y-8 animate-in fade-in slide-in-from-right duration-300">
-                            {/* Competition Builder Card */}
-                            <div className="glass-card p-8 rounded-3xl shadow-sm border border-slate-200">
-                                <h3 className="text-xl font-bold mb-6 text-slate-800">إنشاء مسابقة جديدة 🏗️</h3>
-                                <form onSubmit={handleAddCompetition} className="space-y-6">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
-                                        <div className="md:col-span-2 lg:col-span-2">
-                                            <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">عنوان المسابقة</label>
-                                            <input
-                                                type="text" placeholder="مثال: مسابقة العبافرة - الأسبوع الأول" required
-                                                value={newCompetition.title} onChange={e => setNewCompetition({ ...newCompetition, title: e.target.value })}
-                                                className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold"
-                                            />
-                                        </div>
-                                        <div className="lg:col-span-1">
-                                            <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">الصف الدراسي</label>
-                                            <select
-                                                required value={newCompetition.grade_id} onChange={e => setNewCompetition({ ...newCompetition, grade_id: e.target.value })}
-                                                className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
-                                            >
-                                                <option value="">اختر الصف</option>
-                                                {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                                            </select>
-                                        </div>
-                                        <div className="lg:col-span-1">
-                                            <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">المادة</label>
-                                            <select
-                                                required value={newCompetition.subject_id} onChange={e => setNewCompetition({ ...newCompetition, subject_id: e.target.value })}
-                                                className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
-                                            >
-                                                <option value="">اختر المادة</option>
-                                                {subjects.filter(s => s.grade_id === newCompetition.grade_id).map(s => (
-                                                    <option key={s.id} value={s.id}>{s.master_subjects?.name}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div className="lg:col-span-1">
-                                            <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">الترم</label>
-                                            <select
-                                                value={newCompetition.term} onChange={e => setNewCompetition({ ...newCompetition, term: parseInt(e.target.value) })}
-                                                className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
-                                            >
-                                                <option value={1}>الترم 1</option>
-                                                <option value={2}>الترم 2</option>
-                                            </select>
-                                        </div>
-                                        <div className="lg:col-span-1">
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <div>
-                                                    <label className="block text-[10px] font-bold text-slate-400 mb-2 mr-2">من أسبوع</label>
-                                                    <input
-                                                        type="number" min="1" max="20"
-                                                        value={newCompetition.start_week} onChange={e => setNewCompetition({ ...newCompetition, start_week: parseInt(e.target.value) })}
-                                                        className="w-full p-4 px-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-[10px] font-bold text-slate-400 mb-2 mr-2">إلى أسبوع</label>
-                                                    <input
-                                                        type="number" min="1" max="20"
-                                                        value={newCompetition.end_week} onChange={e => setNewCompetition({ ...newCompetition, end_week: parseInt(e.target.value) })}
-                                                        className="w-full p-4 px-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Quotas Section */}
-                                    <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                                        <h4 className="text-sm font-black text-slate-500 mb-4 flex items-center gap-2">
-                                            <span>📊</span> توزيع صعوبة الأسئلة (الكيوتة)
-                                        </h4>
-                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                            {[
-                                                { key: 'easy_q', label: 'سهل (Easy)', color: 'green', diff: 'easy' },
-                                                { key: 'medium_q', label: 'متوسط (Medium)', color: 'blue', diff: 'medium' },
-                                                { key: 'hard_q', label: 'صعب (Hard)', color: 'rose', diff: 'hard' },
-                                                { key: 'talented_q', label: 'متفوقين (Talented)', color: 'purple', diff: 'talented' }
-                                            ].map(item => {
-                                                const available = getAvailableQuestions(item.diff);
-                                                const requested = newCompetition[item.key];
-                                                const isExceeded = requested > available;
-                                                return (
-                                                    <div key={item.key}>
-                                                        <label className={`block text-[10px] font-bold text-${item.color}-600 mb-1 mr-1`}>{item.label}</label>
-                                                        <input
-                                                            type="number" min="0"
-                                                            value={requested}
-                                                            onChange={e => setNewCompetition({ ...newCompetition, [item.key]: parseInt(e.target.value) || 0 })}
-                                                            className={`w-full p-3 rounded-xl border ${isExceeded ? 'border-red-500 bg-red-50' : 'border-slate-200'} text-center font-bold`}
-                                                        />
-                                                        <div className={`mt-1 text-[9px] font-bold text-right px-1 ${isExceeded ? 'text-red-600' : 'text-slate-400'}`}>
-                                                            متاح: {available} {isExceeded && '(غير كافٍ)'}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                        <div className="mt-4 text-[10px] text-slate-400 italic font-bold">
-                                            إجمالي الأسئلة: {newCompetition.easy_q + newCompetition.medium_q + newCompetition.hard_q + newCompetition.talented_q} سؤال سيتم اختيارها عشوائياً لكل طالب.
-                                        </div>
-                                    </div>
-
-                                    {/* Timer & Attempts Section */}
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                        <div className="bg-amber-50 p-6 rounded-2xl border border-amber-100">
-                                            <h4 className="text-sm font-black text-amber-700 mb-4 flex items-center gap-2">
-                                                <span>⏱️</span> نظام التوقيت
-                                            </h4>
-                                            <div className="space-y-3">
-                                                <label className="flex items-center gap-2 cursor-pointer">
-                                                    <input type="radio" name="timer_type" value="total" checked={newCompetition.timer_type === 'total'} onChange={e => setNewCompetition({ ...newCompetition, timer_type: e.target.value })} className="accent-amber-600" />
-                                                    <span className="text-xs font-bold text-amber-900">وقت كلي للمسابقة</span>
-                                                </label>
-                                                <label className="flex items-center gap-2 cursor-pointer">
-                                                    <input type="radio" name="timer_type" value="per_question" checked={newCompetition.timer_type === 'per_question'} onChange={e => setNewCompetition({ ...newCompetition, timer_type: e.target.value })} className="accent-amber-600" />
-                                                    <span className="text-xs font-bold text-amber-900">وقت محدد لكل سؤال</span>
-                                                </label>
-                                                <div className="mt-4">
-                                                    <label className="block text-[10px] font-bold text-amber-600 mb-1 mr-1">
-                                                        {newCompetition.timer_type === 'total' ? 'المدة الكلية (بالدقائق)' : 'وقت السؤال الواحد (بالدقائق)'}
-                                                    </label>
-                                                    <input
-                                                        type="number"
-                                                        value={Math.floor(newCompetition.duration / 60)}
-                                                        onChange={e => {
-                                                            const mins = parseInt(e.target.value) || 0;
-                                                            setNewCompetition({ ...newCompetition, duration: mins * 60 });
-                                                        }}
-                                                        className="w-full p-3 rounded-xl border border-amber-200 bg-white text-center font-bold text-amber-900"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="md:col-span-2 bg-slate-50 p-6 rounded-2xl border border-slate-100 flex flex-col justify-between">
-                                            <div>
-                                                <h4 className="text-sm font-black text-slate-700 mb-4 flex items-center gap-2">
-                                                    <span>🔄</span> إعدادات المحاولات
-                                                </h4>
-                                                <div className="flex items-center gap-4">
-                                                    <div className="flex-1">
-                                                        <label className="block text-[10px] font-bold text-slate-400 mb-1 mr-1">الحد الأقصى للمحاولات</label>
-                                                        <input type="number" min="1" value={newCompetition.max_attempts} onChange={e => setNewCompetition({ ...newCompetition, max_attempts: parseInt(e.target.value) })} className="w-full p-4 rounded-xl border border-slate-200 text-center font-black text-slate-800" />
-                                                    </div>
-                                                    <p className="flex-1 text-xs text-slate-400 leading-tight">
-                                                        يتحكم هذا الخيار في عدد المرات التي يسمح فيها للطالب بدخول هذه المسابقة.
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <button type="submit" className="mt-6 w-full py-4 bg-slate-800 text-white rounded-xl font-black shadow-lg hover:bg-brand-primary hover:scale-[1.01] transition-all flex items-center justify-center gap-3">
-                                                <span>🚀</span> إنشاء المسابقة وتفعيلها لاحقاً
-                                            </button>
-                                        </div>
-                                    </div>
-                                </form>
                             </div>
 
-                            {/* Competitions List */}
-                            <div className="glass-card rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                                <div className="p-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                                    <h3 className="font-black text-slate-700 text-lg flex items-center gap-2">
-                                        <span>🏁</span> المسابقات الجارية والسابقة
-                                    </h3>
-                                    <div className="relative">
-                                        <input
-                                            type="text" placeholder="بحث باسم المسابقة..."
-                                            value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-                                            className="p-2 pr-10 rounded-xl border border-slate-200 text-xs outline-none focus:ring-2 focus:ring-brand-primary"
-                                        />
-                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 opacity-30">🔍</span>
-                                    </div>
+                            {/* Statistics Cards */}
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                                <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-4 text-white shadow-lg">
+                                    <div className="text-sm opacity-90 mb-1">إجمالي الأسئلة</div>
+                                    <div className="text-3xl font-black">{allQuestions.length}</div>
                                 </div>
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-right">
-                                        <thead className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase">
-                                            <tr>
-                                                <th className="p-4">المسابقة</th>
-                                                <th className="p-4">الصف / المادة</th>
-                                                <th className="p-4">توزيع الأسئلة</th>
-                                                <th className="p-4">نظام التوقيت</th>
-                                                <th className="p-4">المحاولات</th>
-                                                <th className="p-4 text-center">الحالة</th>
-                                                <th className="p-4 text-center">الإجراءات</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100 bg-white">
-                                            {filteredCompetitions.map(comp => (
-                                                <tr key={comp.id} className="hover:bg-slate-50 transition-colors">
-                                                    <td className="p-4">
-                                                        <div className="font-black text-slate-800">{comp.title}</div>
-                                                        <div className="text-[10px] text-slate-400">تاريخ الإنشاء: {new Date(comp.created_at).toLocaleDateString()}</div>
-                                                    </td>
-                                                    <td className="p-4">
-                                                        <div className="text-xs font-bold text-slate-600">{comp.grades?.name}</div>
-                                                        <div className="text-[10px] text-brand-primary font-black">
-                                                            {comp.subjects?.master_subjects?.name} - {comp.start_week === comp.end_week ? `الأسبوع ${comp.start_week}` : `الأسابيع ${comp.start_week}-${comp.end_week}`}
-                                                        </div>
-                                                    </td>
-                                                    <td className="p-4">
-                                                        <div className="flex gap-1">
-                                                            <span className="px-1.5 py-0.5 bg-green-50 text-green-700 rounded text-[9px] font-bold border border-green-100">S:{comp.easy_q}</span>
-                                                            <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-[9px] font-bold border border-blue-100">M:{comp.medium_q}</span>
-                                                            <span className="px-1.5 py-0.5 bg-rose-50 text-rose-700 rounded text-[9px] font-bold border border-rose-100">H:{comp.hard_q}</span>
-                                                            <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[9px] font-bold border border-purple-100">T:{comp.talented_q}</span>
-                                                        </div>
-                                                    </td>
-                                                    <td className="p-4">
-                                                        <div className="text-[10px] font-bold text-slate-500">
-                                                            {comp.timer_type === 'total' ? '⏱️ وقت كلي:' : '⏱️ لكل سؤال:'} <span className="text-slate-800">{comp.duration / 60}د</span>
-                                                        </div>
-                                                    </td>
-                                                    <td className="p-4 text-center font-black text-slate-700">{comp.max_attempts}</td>
-                                                    <td className="p-4 text-center">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleToggleCompetition(comp)}
-                                                            className={`px-3 py-1 rounded-full text-[10px] font-black transition-all ${comp.is_active ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
-                                                        >
-                                                            {comp.is_active ? '✅ نشطة' : '🛑 معطلة'}
-                                                        </button>
-                                                    </td>
-                                                    <td className="p-4">
-                                                        <div className="flex justify-center gap-2">
-                                                            <button type="button" onClick={() => setEditingCompetition(comp)} className="p-2 hover:bg-amber-50 text-amber-600 rounded-lg transition-colors" title="تعديل المسابقة">✏️</button>
-                                                            <button type="button" onClick={() => { setSelectedCompetitionResults(comp); setShowResultsModal(true); }} className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg transition-colors" title="استعراض النتائج">📊</button>
-                                                            <button type="button" onClick={() => handleDeleteCompetition(comp.id)} className="p-2 hover:bg-red-50 text-red-600 rounded-lg transition-colors" title="حذف بالكامل">🗑️</button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                            {filteredCompetitions.length === 0 && (
-                                                <tr>
-                                                    <td colSpan="7" className="p-12 text-center text-slate-400 italic">لا توجد مسابقات حالياً. ابدأ بإنشاء واحدة!</td>
-                                                </tr>
-                                            )}
-                                        </tbody>
-                                    </table>
+                                <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-2xl p-4 text-white shadow-lg">
+                                    <div className="text-sm opacity-90 mb-1">أسئلة مدققة ✅</div>
+                                    <div className="text-3xl font-black">{allQuestions.filter(q => q.is_audited).length}</div>
                                 </div>
-                            </div>
-                        </div>
-                    )}
-                    {activeTab === 'hall_of_fame' && (
-                        <div className="space-y-8 animate-in fade-in slide-in-from-right duration-300">
-                            {/* HOF Navigation & Filters */}
-                            <div className="glass-card p-6 rounded-3xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-center justify-between">
-                                <div className="flex bg-slate-100 p-1.5 rounded-2xl">
-                                    <button
-                                        onClick={() => setHofMode('competition')}
-                                        className={`px-6 py-2.5 rounded-xl font-black transition-all ${hofMode === 'competition' ? 'bg-white text-brand-primary shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                                    >
-                                        لوحة مسابقة محددة
-                                    </button>
-                                    <button
-                                        onClick={() => setHofMode('cumulative')}
-                                        className={`px-6 py-2.5 rounded-xl font-black transition-all ${hofMode === 'cumulative' ? 'bg-white text-brand-primary shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                                    >
-                                        اللوحة التراكمية
-                                    </button>
+                                <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-2xl p-4 text-white shadow-lg">
+                                    <div className="text-sm opacity-90 mb-1">غير مدققة ⚠️</div>
+                                    <div className="text-3xl font-black">{allQuestions.filter(q => !q.is_audited).length}</div>
                                 </div>
-
-                                <div className="flex flex-wrap gap-3 items-center">
-                                    <select
-                                        value={hofSelectedGrade} onChange={e => setHofSelectedGrade(e.target.value)}
-                                        className="p-3 rounded-xl border border-slate-200 bg-white font-bold text-xs outline-none"
-                                    >
-                                        <option value="">كل الصفوف</option>
-                                        {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                                    </select>
-
-                                    {hofMode === 'competition' && (
-                                        <select
-                                            value={hofSelectedCompetition} onChange={e => setHofSelectedCompetition(e.target.value)}
-                                            className="p-3 rounded-xl border border-slate-200 bg-white font-bold text-xs outline-none max-w-[200px]"
-                                        >
-                                            <option value="">اختر المسابقة</option>
-                                            {competitions.filter(c => !hofSelectedGrade || c.grade_id === hofSelectedGrade).map(c => (
-                                                <option key={c.id} value={c.id}>{c.title}</option>
-                                            ))}
-                                        </select>
-                                    )}
-
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-[10px] font-bold text-slate-400">العدد:</span>
-                                        <input
-                                            type="number" value={hofLimit} onChange={e => setHofLimit(parseInt(e.target.value) || 10)}
-                                            className="w-16 p-2 rounded-xl border border-slate-200 text-center font-bold text-xs"
-                                        />
-                                    </div>
-
-                                    <button
-                                        onClick={handleDeleteHofRecords}
-                                        className="p-3 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl transition-all"
-                                        title="مسح السجلات المعروضة"
-                                    >
-                                        🗑️ مسح
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Leaderboard Table */}
-                            <div className="glass-card rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                                <div className="p-6 bg-slate-50 border-b border-slate-200 flex items-center gap-3">
-                                    <div className="text-2xl">🏆</div>
-                                    <h3 className="font-black text-slate-700 text-lg">
-                                        {hofMode === 'competition' ? 'أوائل المسابقة' : 'الأوائل التراكمي (إجمالي النقاط)'}
-                                    </h3>
-                                </div>
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-right">
-                                        <thead className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase">
-                                            <tr>
-                                                <th className="p-4 text-center">المركز</th>
-                                                <th className="p-4">الطالب</th>
-                                                <th className="p-4">المدرسة</th>
-                                                <th className="p-4">الصف - الفصل</th>
-                                                <th className="p-4 text-center">{hofMode === 'cumulative' ? 'إجمالي النقاط' : 'الدرجة'}</th>
-                                                {hofMode === 'competition' && <th className="p-4 text-center">الوقت المستغرق</th>}
-                                                {hofMode === 'cumulative' && <th className="p-4 text-center">عدد المحاولات</th>}
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100 bg-white">
-                                            {getHofLeaderboard().map((row, index) => {
-                                                const student = hofMode === 'cumulative' ? row.student : row.students;
-                                                const rank = index + 1;
-                                                const isMedal = rank <= 3;
-                                                const medalEmoji = rank === 1 ? '🥇' : rank === 2 ? '🥈' : '🥉';
-
-                                                return (
-                                                    <tr key={hofMode === 'cumulative' ? student?.id : row.id} className={`${isMedal ? 'bg-amber-50/30' : ''} hover:bg-slate-50 transition-colors`}>
-                                                        <td className="p-4 text-center">
-                                                            <div className={`inline-flex items-center justify-center w-8 h-8 rounded-full font-black text-sm ${isMedal ? 'text-2xl' : 'bg-slate-100 text-slate-500'}`}>
-                                                                {isMedal ? medalEmoji : rank}
-                                                            </div>
-                                                        </td>
-                                                        <td className="p-4">
-                                                            <div className="font-black text-slate-800">{student?.name || 'مستخدم غير معروف'}</div>
-                                                        </td>
-                                                        <td className="p-4">
-                                                            <div className="text-xs font-bold text-slate-500">{student?.schools?.name || '---'}</div>
-                                                        </td>
-                                                        <td className="p-4">
-                                                            <div className="text-xs font-bold text-slate-600">
-                                                                {student?.grades?.name} {student?.class_name && `- ${student.class_name}`}
-                                                            </div>
-                                                        </td>
-                                                        <td className="p-4 text-center">
-                                                            <div className={`font-black text-lg ${rank === 1 ? 'text-amber-600' : 'text-slate-700'}`}>
-                                                                {row.score}
-                                                            </div>
-                                                        </td>
-                                                        {hofMode === 'competition' && (
-                                                            <td className="p-4 text-center">
-                                                                <div className="text-xs font-bold text-slate-400">
-                                                                    {Math.floor(row.time_spent / 60)}د {row.time_spent % 60}ث
-                                                                </div>
-                                                            </td>
-                                                        )}
-                                                        {hofMode === 'cumulative' && (
-                                                            <td className="p-4 text-center">
-                                                                <div className="text-sm font-bold text-slate-500">
-                                                                    {row.count} محاولة
-                                                                </div>
-                                                            </td>
-                                                        )}
-                                                    </tr>
-                                                );
-                                            })}
-                                            {getHofLeaderboard().length === 0 && (
-                                                <tr>
-                                                    <td colSpan={6} className="p-12 text-center text-slate-400 italic">
-                                                        لا توجد بيانات متاحة حالياً للعرض.
-                                                    </td>
-                                                </tr>
-                                            )}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                    {activeTab === 'polls' && (
-                        <div className="space-y-8 animate-in fade-in slide-in-from-right duration-300">
-                            <div className="glass-card p-8 rounded-3xl shadow-sm border border-slate-200 min-w-full">
-                                <h3 className="text-xl font-bold mb-6 text-slate-800">إنشاء تصويت جديد</h3>
-                                <form onSubmit={handleAddPoll} className="space-y-6">
-                                    <div className="grid grid-cols-1 gap-4">
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div>
-                                                <label className="block text-sm font-bold text-slate-500 mb-2 mr-1">توجيه التصويت لـ:</label>
-                                                <select
-                                                    value={newPoll.school_id || ''}
-                                                    onChange={e => setNewPoll({ ...newPoll, school_id: e.target.value || null })}
-                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right font-bold bg-white"
-                                                >
-                                                    <option value="">كافة المدارس (عام) 🌍</option>
-                                                    {schools.map(school => (
-                                                        <option key={school.id} value={school.id}>{school.name}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label className="block text-sm font-bold text-slate-500 mb-2 mr-1">سؤال التصويت:</label>
-                                                <input
-                                                    type="text" placeholder="مثال: ما رأيك في صعوبة مسابقة هذا الأسبوع؟" required
-                                                    value={newPoll.question} onChange={e => setNewPoll({ ...newPoll, question: e.target.value })}
-                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right font-bold"
-                                                />
-                                            </div>
-                                        </div>
-
-                                        <div className="space-y-3">
-                                            <label className="block text-sm font-bold text-slate-500 mr-1">خيارات التصويت:</label>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                {newPoll.options.map((option, idx) => (
-                                                    <div key={idx} className="flex gap-2">
-                                                        <input
-                                                            type="text" placeholder={`الخيار ${idx + 1}`} required
-                                                            value={option} onChange={e => {
-                                                                const next = [...newPoll.options]
-                                                                next[idx] = e.target.value
-                                                                setNewPoll({ ...newPoll, options: next })
-                                                            }}
-                                                            className="flex-1 p-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right"
-                                                        />
-                                                        {newPoll.options.length > 2 && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setNewPoll({ ...newPoll, options: newPoll.options.filter((_, i) => i !== idx) })}
-                                                                className="p-3 text-red-500 hover:bg-red-50 rounded-xl transition-all"
-                                                            >
-                                                                ✕
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                ))}
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setNewPoll({ ...newPoll, options: [...newPoll.options, ''] })}
-                                                    className="p-3 border-2 border-dashed border-slate-200 text-slate-400 rounded-xl font-bold hover:border-brand-primary hover:text-brand-primary transition-all"
-                                                >
-                                                    + إضافة خيار جديد
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        <button type="submit" className="bg-slate-800 text-white rounded-xl font-bold hover:bg-brand-primary transition-all shadow-md py-4 mt-2">
-                                            نشر التصويت للطلاب
-                                        </button>
-                                    </div>
-                                </form>
-                            </div>
-
-                            <div className="glass-card rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                                <div className="p-6 bg-slate-50 border-b border-slate-200">
-                                    <h3 className="font-bold text-slate-700 text-lg">التصويتات الحالية والنتائج</h3>
-                                </div>
-                                <div className="divide-y divide-slate-100">
-                                    {polls.map(poll => {
-                                        const results = pollResults[poll.id] || {}
-                                        const totalVotes = Object.values(results).reduce((a, b) => a + b, 0)
-
-                                        return (
-                                            <div key={poll.id} className="p-8 hover:bg-slate-50 transition-all">
-                                                <div className="flex justify-between items-start mb-6">
-                                                    <div className="flex gap-3">
-                                                        <button
-                                                            onClick={() => handleDeletePoll(poll.id)}
-                                                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
-                                                            title="حذف"
-                                                        >
-                                                            🗑️
-                                                        </button>
-                                                        <button
-                                                            onClick={() => setShowPollDetailsModal(poll)}
-                                                            className="p-2 text-slate-400 hover:text-brand-primary hover:bg-blue-50 rounded-xl transition-all"
-                                                            title="عرض تفاصيل المصوتين"
-                                                        >
-                                                            👁️
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleTogglePoll(poll)}
-                                                            className={`px-4 py-1 rounded-full text-xs font-bold transition-all ${poll.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}
-                                                        >
-                                                            {poll.is_active ? 'نشط الآن' : 'غير نشط'}
-                                                        </button>
-                                                    </div>
-                                                    <div className="text-right flex-1 px-4">
-                                                        <h4 className="font-black text-xl text-slate-800 mb-2">{poll.question}</h4>
-                                                        <div className="flex justify-end gap-3 text-xs font-bold">
-                                                            <span className="text-slate-400">تاريخ النشر: {new Date(poll.created_at).toLocaleDateString()}</span>
-                                                            <span className="text-slate-300">|</span>
-                                                            <span className="text-slate-400">إجمالي الأصوات: {totalVotes}</span>
-                                                            <span className="text-slate-300">|</span>
-                                                            <span className={poll.school_id ? "text-brand-primary" : "text-emerald-500"}>
-                                                                🎯 الموجه لـ: {poll.school_id ? (schools.find(s => s.id === poll.school_id)?.name || 'مدرسة غير معروفة') : 'كافة المدارس'}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
-                                                    {poll.options.map((opt, idx) => {
-                                                        const votes = results[idx] || 0
-                                                        const percent = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0
-                                                        return (
-                                                            <div key={idx} className="space-y-2">
-                                                                <div className="flex justify-between text-xs font-bold">
-                                                                    <span className="text-brand-primary">{percent}% ({votes} صوت)</span>
-                                                                    <span className="text-slate-600">{opt}</span>
-                                                                </div>
-                                                                <div className="h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
-                                                                    <div
-                                                                        className="h-full bg-brand-primary transition-all duration-1000"
-                                                                        style={{ width: `${percent}%` }}
-                                                                    />
-                                                                </div>
-                                                            </div>
-                                                        )
-                                                    })}
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
-                                    {polls.length === 0 && (
-                                        <div className="p-12 text-center text-slate-400 italic">لا توجد تصويتات مضافة حالياً.</div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                    {activeTab === 'settings' && (
-                        <div className="space-y-8 animate-in fade-in slide-in-from-right duration-300">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                {/* Change Password Card */}
-                                <div className="glass-card p-8 rounded-3xl shadow-sm border border-slate-200">
-                                    <div className="flex items-center gap-3 mb-6">
-                                        <div className="p-3 bg-brand-primary/10 rounded-2xl text-2xl">🔒</div>
-                                        <h3 className="text-xl font-bold text-slate-800">تغيير كلمة المرور</h3>
-                                    </div>
-                                    <div className="space-y-4 text-right" dir="rtl">
-                                        <div>
-                                            <label className="block text-sm font-bold text-slate-500 mb-2">كلمة المرور الجديدة</label>
-                                            <input
-                                                type="password" value={settingsNewPassword} onChange={e => setSettingsNewPassword(e.target.value)}
-                                                className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right"
-                                                placeholder="أدخل كلمة المرور الجديدة"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-bold text-slate-500 mb-2">تأكيد كلمة المرور</label>
-                                            <input
-                                                type="password" value={settingsConfirmPassword} onChange={e => setSettingsConfirmPassword(e.target.value)}
-                                                className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right"
-                                                placeholder="أعد كتابة كلمة المرور"
-                                            />
-                                        </div>
-                                        <button
-                                            onClick={() => {
-                                                if (!settingsNewPassword || settingsNewPassword !== settingsConfirmPassword) {
-                                                    alert('كلمات المرور غير متطابقة أو فارغة')
-                                                    return
-                                                }
-                                                startSecurityChallenge(async () => {
-                                                    const { error } = await supabase.from('admins').update({ password_hash: settingsNewPassword }).eq('id', user.id)
-                                                    if (error) alert('خطأ في التحديث: ' + error.message)
-                                                    else {
-                                                        alert('تم تغيير كلمة المرور بنجاح. يرجى استخدامها في المرة القادمة.')
-                                                        setSettingsNewPassword('')
-                                                        setSettingsConfirmPassword('')
-                                                    }
-                                                })
-                                            }}
-                                            className="w-full py-4 bg-brand-primary text-white rounded-xl font-bold hover:shadow-lg transition-all"
-                                        >
-                                            تحديث كلمة المرور
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {/* Global Data Management Card */}
-                                <div className="glass-card p-8 rounded-3xl shadow-sm border border-slate-200">
-                                    <div className="flex items-center gap-3 mb-6">
-                                        <div className="p-3 bg-red-100 rounded-2xl text-2xl">⚠️</div>
-                                        <h3 className="text-xl font-bold text-slate-800">إدارة البيانات العامة</h3>
-                                    </div>
-                                    <div className="space-y-6">
-                                        <div className="p-4 bg-red-50 text-red-700 rounded-2xl text-sm leading-relaxed font-bold border border-red-100 text-right">
-                                            تحذير: هذه العمليات نهائية ولا يمكن التراجع عنها. سيتم حذف جميع نتائج الطلاب من كافة المسابقات.
-                                        </div>
-                                        <button
-                                            onClick={() => {
-                                                startSecurityChallenge(async () => {
-                                                    if (!confirm('هل أنت متأكد من مسح جميع نتائج الطلاب بالكامل من النظام؟')) return
-                                                    const { error } = await supabase.from('results').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-                                                    if (error) alert('خطأ في الحذف: ' + error.message)
-                                                    else {
-                                                        alert('تم مسح جميع سجلات النتائج بنجاح')
-                                                        fetchAllData()
-                                                    }
-                                                })
-                                            }}
-                                            className="w-full py-4 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 shadow-md transition-all"
-                                        >
-                                            🔥 مسح كافة نتائج الطلاب (تصفير اللوحة)
-                                        </button>
-
-                                        <div className="pt-4 border-t border-red-100 flex flex-col gap-3">
-                                            <button
-                                                onClick={() => {
-                                                    startSecurityChallenge(async () => {
-                                                        if (!confirm('سيتم حذف جميع حسابات الطلاب المسجلين بالكامل. هل أنت متأكد؟')) return
-                                                        const { error } = await supabase.from('students').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-                                                        if (error) alert('خطأ: ' + error.message)
-                                                        else { alert('تم حذف جميع الطلاب بنجاح'); fetchAllData(); }
-                                                    })
-                                                }}
-                                                className="w-full py-3 bg-white text-red-600 border border-red-200 rounded-xl font-bold hover:bg-red-50 transition-all"
-                                            >
-                                                🗑️ حذف جميع أسماء الطلاب
-                                            </button>
-
-                                            <button
-                                                onClick={() => {
-                                                    startSecurityChallenge(async () => {
-                                                        if (!confirm('سيتم حذف جميع حسابات المعلمين المسجلين. هل أنت متأكد؟')) return
-                                                        const { error } = await supabase.from('teachers').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-                                                        if (error) alert('خطأ: ' + error.message)
-                                                        else { alert('تم حذف جميع المعلمين بنجاح'); fetchAllData(); }
-                                                    })
-                                                }}
-                                                className="w-full py-3 bg-white text-red-600 border border-red-200 rounded-xl font-bold hover:bg-red-50 transition-all"
-                                            >
-                                                👨‍🏫 حذف جميع أسماء المعلمين
-                                            </button>
-
-                                            <button
-                                                onClick={() => {
-                                                    startSecurityChallenge(async () => {
-                                                        if (!confirm('تنبيه: حذف المدارس سيؤدي لحذف كافة البيانات المرتبطة بها (طلاب، معلمين، نتائج). هل أنت متأكد تماماً؟')) return
-                                                        const { error } = await supabase.from('schools').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-                                                        if (error) alert('خطأ: ' + error.message)
-                                                        else { alert('تم حذف جميع المدارس بنجاح'); fetchAllData(); }
-                                                    })
-                                                }}
-                                                className="w-full py-3 bg-white text-red-600 border border-red-200 rounded-xl font-bold hover:bg-red-50 transition-all"
-                                            >
-                                                🏫 حذف جميع المدارس وبياناتها
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* WhatsApp Template Management Card */}
-                                <div className="glass-card p-8 rounded-3xl shadow-sm border border-slate-200">
-                                    <div className="flex items-center gap-3 mb-6">
-                                        <div className="p-3 bg-brand-primary/10 rounded-2xl text-2xl">📱</div>
-                                        <h3 className="text-xl font-bold text-slate-800">تخصيص رسالة الواتساب</h3>
-                                    </div>
-                                    <div className="space-y-4 text-right" dir="rtl">
-                                        <div className="p-4 bg-blue-50 text-blue-700 rounded-2xl text-[11px] font-bold leading-relaxed border border-blue-100">
-                                            استخدم الرموز التالية ليتم استبدالها تلقائياً:<br />
-                                            اسم الطالب/المعلم : <span className="text-brand-primary">{"{name}"}</span><br />
-                                            كود الدخول : <span className="text-brand-primary">{"{code}"}</span><br />
-                                            (طالب أو معلم) : <span className="text-brand-primary">{"{role}"}</span><br />
-                                            رابط الموقع : <span className="text-brand-primary">{"{link}"}</span><br />
-                                            كود المدرسة : <span className="text-brand-primary">{"{school_code}"}</span><br />
-                                            رابط صفحة المدرسة : <span className="text-brand-primary">{"{school_page}"}</span>
-                                        </div>
-                                        <textarea
-                                            value={whatsappTemplate}
-                                            onChange={e => setWhatsappTemplate(e.target.value)}
-                                            rows="6"
-                                            className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-sm font-bold text-right leading-relaxed"
-                                            placeholder="اكتب نص الرسالة هنا..."
-                                            dir="rtl"
-                                        />
-
-                                        {/* Real-time Preview */}
-                                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-right">
-                                            <div className="text-[10px] text-slate-400 mb-2 font-bold">👁️ معاينة شكل الرسالة:</div>
-                                            <div className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed" dir="rtl">
-                                                {(whatsappTemplate || `مرحباً {name}\nيسعدنا انضمامك لمنصة المتكامل.\n\nبيانات الدخول الخاصة بك كـ ({role}):\nكود الدخول: *{code}*\n\nنتمنى لك تجربة ممتعة! 🌹`)
-                                                    .replace(/\\n/g, '\n')
-                                                    .replace(/{name}/g, 'أحمد محمد')
-                                                    .replace(/{code}/g, '12345678')
-                                                    .replace(/{role}/g, 'طالب')
-                                                    .replace(/{link}/g, window.location.origin)
-                                                    .replace(/{school_code}/g, 'SCH001')
-                                                    .replace(/{school_page}/g, 'fb.com/school')}
-                                            </div>
-                                        </div>
-
-                                        <button
-                                            onClick={async () => {
-                                                const { error } = await supabase.from('config').upsert({ key: 'whatsapp_template', value: whatsappTemplate })
-                                                if (error) alert('خطأ في الحفظ: ' + error.message)
-                                                else alert('تم حفظ قالب الرسالة بنجاح')
-                                            }}
-                                            className="w-full py-4 bg-brand-primary text-white rounded-xl font-bold hover:shadow-lg transition-all"
-                                        >
-                                            حفظ القالب الجديد
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                    {/* CSV Import Modal */}
-                    {showImportModal && (
-                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
-                                <h3 className="text-xl font-bold mb-4 text-right">استيراد طلاب من ملف CSV</h3>
-                                <p className="text-sm text-slate-500 mb-6 text-right leading-relaxed">
-                                    تأكد أن الملف يحتوي على أعمدة (name, code, grade, class).<br />
-                                    في حال عدم وجود كود، سيقوم النظام بتوليد كود تلقائي.
-                                </p>
-
-                                <div className="space-y-4 mb-8">
-                                    <label className="block text-sm font-bold text-slate-500 text-right">اختر المدرسة المراد الإضافة إليها:</label>
-                                    <select
-                                        id="import-school-select"
-                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right font-bold"
-                                    >
-                                        <option value="">-- اختر مدرسة --</option>
-                                        {schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                    </select>
-
-                                    <div className="relative border-2 border-dashed border-slate-200 rounded-2xl p-8 hover:bg-slate-50 transition-all cursor-pointer group">
-                                        <input
-                                            type="file"
-                                            accept=".csv"
-                                            onChange={(e) => {
-                                                const schoolId = document.getElementById('import-school-select').value
-                                                if (!schoolId) {
-                                                    alert('يرجى اختيار المدرسة أولاً')
-                                                    e.target.value = null
-                                                    return
-                                                }
-                                                const file = e.target.files[0]
-                                                if (file) {
-                                                    const reader = new FileReader()
-                                                    reader.onload = (event) => handleCSVImport(schoolId, event.target.result)
-                                                    reader.readAsText(file)
-                                                }
-                                            }}
-                                            className="absolute inset-0 opacity-0 cursor-pointer"
-                                        />
-                                        <div className="text-center">
-                                            <div className="text-3xl mb-2 group-hover:scale-110 transition-transform">📂</div>
-                                            <div className="text-sm font-bold text-slate-600">اضغط لرفع ملف طلاب CSV</div>
-                                            <div className="text-xs text-slate-400 mt-1">UTF-8 encoded .csv</div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="flex justify-end gap-3">
-                                    <button
-                                        onClick={() => setShowImportModal(false)}
-                                        className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
-                                    >
-                                        إلغاء
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </main>
-
-                {/* Edit Phase Modal */}
-                {editingPhase && (
-                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
-                            <h3 className="text-xl font-bold mb-4 text-right">تعديل المرحلة الدراسية</h3>
-                            <form onSubmit={handleUpdatePhase} className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">اسم المرحلة</label>
-                                    <input
-                                        type="text"
-                                        required
-                                        value={editingPhase.name}
-                                        onChange={e => setEditingPhase({ ...editingPhase, name: e.target.value })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right"
-                                    />
-                                </div>
-                                <div className="flex justify-end gap-3 mt-8">
-                                    <button type="button" onClick={() => setEditingPhase(null)} className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200">إلغاء</button>
-                                    <button type="submit" className="px-6 py-3 bg-brand-primary text-white rounded-xl font-bold hover:scale-[1.02] transition-all">حفظ التعديلات</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                )}
-
-                {/* Edit Grade Modal */}
-                {editingGrade && (
-                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
-                            <h3 className="text-xl font-bold mb-4 text-right">تعديل الصف الدراسي</h3>
-                            <form onSubmit={handleUpdateGrade} className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">المرحلة الدراسية</label>
-                                    <select
-                                        required
-                                        value={editingGrade.phase_id}
-                                        onChange={e => setEditingGrade({ ...editingGrade, phase_id: e.target.value })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 bg-white text-right font-bold"
-                                    >
-                                        {phases.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">اسم الصف</label>
-                                    <input
-                                        type="text"
-                                        required
-                                        value={editingGrade.name}
-                                        onChange={e => setEditingGrade({ ...editingGrade, name: e.target.value })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right"
-                                    />
-                                </div>
-                                <div className="flex justify-end gap-3 mt-8">
-                                    <button type="button" onClick={() => setEditingGrade(null)} className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200">إلغاء</button>
-                                    <button type="submit" className="px-6 py-3 bg-brand-primary text-white rounded-xl font-bold hover:scale-[1.02] transition-all">حفظ التعديلات</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                )}
-
-                {/* Edit Subject Modal */}
-                {editingSubject && (
-                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
-                            <h3 className="text-xl font-bold mb-4 text-right">تعديل المادة الدراسية</h3>
-                            <form onSubmit={handleUpdateSubject} className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">الصف الدراسي</label>
-                                    <select
-                                        required
-                                        value={editingSubject.grade_id}
-                                        onChange={e => setEditingSubject({ ...editingSubject, grade_id: e.target.value })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 bg-white text-right font-bold"
-                                    >
-                                        {grades.map(g => <option key={g.id} value={g.id}>{g.educational_phases?.name} - {g.name}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">المادة الدراسية</label>
-                                    <select
-                                        required
-                                        value={editingSubject.master_subject_id}
-                                        onChange={e => setEditingSubject({ ...editingSubject, master_subject_id: e.target.value })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 bg-white text-right font-bold"
-                                    >
-                                        <option value="">اختر المادة العامة</option>
-                                        {masterSubjects.map(ms => <option key={ms.id} value={ms.id}>{ms.name}</option>)}
-                                    </select>
-                                </div>
-                                <div className="flex justify-end gap-3 mt-8">
-                                    <button type="button" onClick={() => setEditingSubject(null)} className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200">إلغاء</button>
-                                    <button type="submit" className="px-6 py-3 bg-brand-primary text-white rounded-xl font-bold hover:scale-[1.02] transition-all">حفظ التعديلات</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                )}
-                {/* Edit Teacher Modal */}
-                {editingTeacher && (
-                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
-                            <h3 className="text-xl font-bold mb-4 text-right">تعديل بيانات المعلم</h3>
-                            <form onSubmit={handleUpdateTeacher} className="space-y-4 text-right">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2">اسم المعلم</label>
-                                    <input
-                                        type="text" required
-                                        value={editingTeacher.name}
-                                        onChange={e => setEditingTeacher({ ...editingTeacher, name: e.target.value })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2">المدرسة</label>
-                                    <select
-                                        required
-                                        value={editingTeacher.school_id}
-                                        onChange={e => setEditingTeacher({ ...editingTeacher, school_id: e.target.value })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 bg-white"
-                                    >
-                                        {schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2">التخصص (المادة العامة)</label>
-                                    <select
-                                        required
-                                        value={editingTeacher.master_subject_id}
-                                        onChange={e => setEditingTeacher({ ...editingTeacher, master_subject_id: e.target.value })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 bg-white"
-                                    >
-                                        <option value="">اختر التخصص</option>
-                                        {masterSubjects.map(ms => <option key={ms.id} value={ms.id}>{ms.name}</option>)}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2">كود الدخول</label>
-                                    <input
-                                        type="text" required
-                                        value={editingTeacher.teacher_code}
-                                        onChange={e => setEditingTeacher({ ...editingTeacher, teacher_code: e.target.value })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2">رقم الواتساب (اختياري)</label>
-                                    <input
-                                        type="text"
-                                        value={editingTeacher.whatsapp_number || ''}
-                                        onChange={e => setEditingTeacher({ ...editingTeacher, whatsapp_number: e.target.value })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary"
-                                        placeholder="01xxxxxxxxx"
-                                    />
-                                </div>
-                                <div className="flex justify-end gap-3 mt-8">
-                                    <button type="button" onClick={() => setEditingTeacher(null)} className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200">إلغاء</button>
-                                    <button type="submit" className="px-6 py-3 bg-brand-primary text-white rounded-xl font-bold hover:scale-[1.02] transition-all">حفظ التعديلات</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                )}
-
-                {/* Edit Student Modal */}
-                {editingStudent && (
-                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
-                            <h3 className="text-xl font-bold mb-4 text-right">تعديل بيانات الطالب</h3>
-                            <form onSubmit={handleUpdateStudent} className="space-y-4 text-right">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2">اسم الطالب</label>
-                                    <input
-                                        type="text" required
-                                        value={editingStudent.name}
-                                        onChange={e => setEditingStudent({ ...editingStudent, name: e.target.value })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2">المدرسة</label>
-                                    <select
-                                        required
-                                        value={editingStudent.school_id}
-                                        onChange={e => setEditingStudent({ ...editingStudent, school_id: e.target.value })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 bg-white"
-                                    >
-                                        {schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                    </select>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-bold text-slate-500 mb-2">الصف الدراسي</label>
-                                        <select
-                                            required
-                                            value={editingStudent.grade_id}
-                                            onChange={e => setEditingStudent({ ...editingStudent, grade_id: e.target.value })}
-                                            className="w-full p-4 rounded-xl border border-slate-200 bg-white"
-                                        >
-                                            {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-bold text-slate-500 mb-2">اسم الفصل</label>
-                                        <input
-                                            type="text" required
-                                            value={editingStudent.class_name}
-                                            onChange={e => setEditingStudent({ ...editingStudent, class_name: e.target.value })}
-                                            className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary"
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2">كود الدخول</label>
-                                    <input
-                                        type="text" required
-                                        value={editingStudent.student_code}
-                                        onChange={e => setEditingStudent({ ...editingStudent, student_code: e.target.value })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2">رقم الواتساب (اختياري)</label>
-                                    <input
-                                        type="text"
-                                        value={editingStudent.whatsapp_number || ''}
-                                        onChange={e => setEditingStudent({ ...editingStudent, whatsapp_number: e.target.value })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary"
-                                        placeholder="01xxxxxxxxx"
-                                    />
-                                </div>
-                                <div className="flex justify-end gap-3 mt-8">
-                                    <button type="button" onClick={() => setEditingStudent(null)} className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200">إلغاء</button>
-                                    <button type="submit" className="px-6 py-3 bg-brand-primary text-white rounded-xl font-bold hover:scale-[1.02] transition-all">حفظ التعديلات</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                )}
-
-                {/* Global Edit Question Modal */}
-                {editingQuestion && (
-                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-8 animate-in zoom-in duration-200 overflow-y-auto max-h-[90vh]">
-                            <h3 className="text-xl font-bold mb-6 text-right">تعديل بيانات السؤال (إدارة عليا)</h3>
-                            <form onSubmit={handleUpdateQuestion} className="space-y-6 text-right">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-500 mb-2">نص السؤال</label>
-                                    <textarea
-                                        value={editingQuestion.content?.question || ''}
-                                        onChange={e => setEditingQuestion({
-                                            ...editingQuestion,
-                                            content: { ...editingQuestion.content, question: e.target.value }
-                                        })}
-                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary h-24"
-                                    />
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-bold text-slate-500 mb-2">المادة</label>
-                                        <select
-                                            value={editingQuestion.subject_id || ''}
-                                            onChange={e => setEditingQuestion({ ...editingQuestion, subject_id: e.target.value })}
-                                            className="w-full p-4 rounded-xl border border-slate-200 bg-white"
-                                        >
-                                            <option value="">-- اختر المادة --</option>
-                                            {subjects.map(s => (
-                                                <option key={s.id} value={s.id}>{s.master_subjects?.name}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-bold text-slate-500 mb-2">الصف</label>
-                                        <select
-                                            value={editingQuestion.grade_id || ''}
-                                            onChange={e => setEditingQuestion({ ...editingQuestion, grade_id: e.target.value })}
-                                            className="w-full p-4 rounded-xl border border-slate-200 bg-white"
-                                        >
-                                            <option value="">-- اختر الصف --</option>
-                                            {grades.map(g => (
-                                                <option key={g.id} value={g.id}>{g.name}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-bold text-slate-500 mb-2">مستوى الصعوبة</label>
-                                        <select
-                                            value={editingQuestion.difficulty}
-                                            onChange={e => {
-                                                const newDiff = e.target.value
-                                                let newScore = 1
-                                                if (newDiff === 'easy') newScore = 1
-                                                if (newDiff === 'medium') newScore = 2
-                                                if (newDiff === 'hard') newScore = 3
-                                                if (newDiff === 'talented') newScore = 4;
-
-                                                setEditingQuestion({
-                                                    ...editingQuestion,
-                                                    difficulty: newDiff,
-                                                    content: { ...editingQuestion.content, score: newScore }
-                                                })
-                                            }}
-                                            className="w-full p-4 rounded-xl border border-slate-200 bg-white"
-                                        >
-                                            <option value="easy">سهل</option>
-                                            <option value="medium">متوسط</option>
-                                            <option value="hard">صعب</option>
-                                            <option value="talented">متفوقين</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-bold text-slate-500 mb-2">الترم</label>
-                                        <select
-                                            value={editingQuestion.term}
-                                            onChange={e => setEditingQuestion({ ...editingQuestion, term: parseInt(e.target.value) })}
-                                            className="w-full p-4 rounded-xl border border-slate-200 bg-white"
-                                        >
-                                            <option value="1">الترم الأول</option>
-                                            <option value="2">الترم الثاني</option>
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <div className="flex justify-end gap-3 mt-8">
-                                    <button type="button" onClick={() => setEditingQuestion(null)} className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200">إلغاء</button>
-                                    <button type="submit" className="px-6 py-3 bg-brand-primary text-white rounded-xl font-bold hover:scale-[1.02] transition-all">حفظ التغييرات</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                )}
-
-                {/* Questions Tab Preview Modal */}
-                {previewQuestion && (
-                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col">
-                            {/* Modal Header */}
-                            <div className="p-6 border-b border-slate-100 flex justify-between items-center sticky top-0 bg-white z-10">
-                                <div>
-                                    <h3 className="text-2xl font-black text-slate-800">معاينة السؤال (طالب)</h3>
-                                    <p className="text-sm text-slate-500 mt-1">هكذا سيظهر السؤال للطالب في المسابقة</p>
-                                </div>
-                                <button onClick={() => setPreviewQuestion(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-                                    ❌
-                                </button>
-                            </div>
-
-                            {/* Modal Body - Student View Simulation */}
-                            <div className="p-8 bg-slate-50 flex-1">
-                                {/* Question Content */}
-                                <div className="bg-white rounded-3xl p-8 shadow-sm border border-slate-200 mb-8 text-center">
-                                    {/* Image if exists */}
-                                    {previewQuestion.content?.image && (
-                                        <div className="mb-6 rounded-2xl overflow-hidden border border-slate-200 max-w-md mx-auto">
-                                            <img src={previewQuestion.content.image} alt="Question" className="w-full h-auto" />
-                                        </div>
-                                    )}
-
-                                    {/* Question Text */}
-                                    <h2 className="text-2xl md:text-3xl font-black text-slate-800 leading-relaxed mb-4" dir="auto">
-                                        {convertMathToLatex(previewQuestion.content?.question || previewQuestion.content?.text)}
-                                    </h2>
-                                </div>
-
-                                {/* Options Grid */}
-                                <div className="mb-2 px-4">
-                                    <p className="text-sm text-slate-500 italic">💡 انقر على أي اختيار لتحديده كإجابة صحيحة</p>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                                    {previewQuestion.content?.options?.map((option, idx) => {
-                                        const isCorrect = option === previewQuestion.correct_answer ||
-                                            option === previewQuestion.content?.correct ||
-                                            idx === previewQuestion.content?.correct ||
-                                            idx === parseInt(previewQuestion.correct_answer) ||
-                                            idx === parseInt(previewQuestion.content?.correct);
-                                        return (
-                                            <div
-                                                key={idx}
-                                                onClick={() => handleUpdateQuestionField(previewQuestion, 'correct_answer', idx)}
-                                                className={`p-4 rounded-xl border-2 flex items-center gap-3 transition-all cursor-pointer hover:scale-[1.02] ${isCorrect
-                                                    ? 'border-green-500 bg-green-50 ring-4 ring-green-100'
-                                                    : 'border-slate-200 bg-white opacity-70 hover:border-blue-300 hover:bg-blue-50'
-                                                    }`}
-                                            >
-                                                <span className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm ${isCorrect ? 'bg-green-500 text-white' : 'bg-slate-100 text-slate-400'
-                                                    }`}>
-                                                    {idx + 1}
-                                                </span>
-                                                <span className={`font-bold text-lg ${isCorrect ? 'text-green-700' : 'text-slate-600'}`} dir="auto">
-                                                    {convertMathToLatex(option)}
-                                                </span>
-                                                {isCorrect && <span className="mr-auto text-green-600 text-xl">✓ الإجابة الصحيحة</span>}
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-
-                                {/* Editable Question Details: Level & Score */}
-                                <div className="grid grid-cols-2 gap-6 mb-4 px-4">
-                                    <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                                        <label className="block text-sm font-bold text-slate-500 mb-2 text-right">مستوى السؤال (Level)</label>
-                                        <select
-                                            className="w-full p-2 rounded-xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-blue-100"
-                                            value={previewQuestion.difficulty || 'medium'}
-                                            onChange={(e) => handleUpdateQuestionField(previewQuestion, 'difficulty', e.target.value)}
-                                        >
-                                            <option value="easy">سهل (Easy)</option>
-                                            <option value="medium">متوسط (Medium)</option>
-                                            <option value="hard">صعب (Hard)</option>
-                                            <option value="talented">متفوقين (Talented)</option>
-                                        </select>
-                                    </div>
-                                    <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                                        <label className="block text-sm font-bold text-slate-500 mb-2 text-right">درجة السؤال (Score)</label>
-                                        <input
-                                            type="number"
-                                            className="w-full p-2 rounded-xl bg-slate-50 border-none font-bold text-slate-700 text-center focus:ring-2 focus:ring-blue-100"
-                                            value={previewQuestion.score || 1}
-                                            onChange={(e) => handleUpdateQuestionField(previewQuestion, 'score', parseFloat(e.target.value))}
-                                            min="0.5"
-                                            step="0.5"
-                                        />
+                                <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl p-4 text-white shadow-lg">
+                                    <div className="text-sm opacity-90 mb-1">نسبة التدقيق</div>
+                                    <div className="text-3xl font-black">
+                                        {allQuestions.length > 0 ? Math.round((allQuestions.filter(q => q.is_audited).length / allQuestions.length) * 100) : 0}%
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Modal Footer - Audit Controls */}
-                            <div className="p-6 bg-white border-t border-slate-100">
-                                <div className="flex items-center justify-between bg-blue-50 p-4 rounded-2xl border border-blue-100">
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-2xl">
-                                            👨‍🏫
-                                        </div>
-                                        <div>
-                                            <div className="font-bold text-slate-800">تدقيق المعلم المختص</div>
-                                            <div className="text-sm text-slate-500">هل تمت مراجعة هذا السؤال والتأكد من صحته؟</div>
-                                        </div>
-                                    </div>
-
-                                    <div className={`px-4 py-2 rounded-xl font-bold flex items-center gap-3 transition-all ${previewQuestion.is_audited ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                                        <span className="text-sm">
-                                            {previewQuestion.is_audited ? 'تم التدقيق واعتماد السؤال' : 'السؤال غير مدقق حتى الآن'}
-                                        </span>
-                                        <label className="relative inline-flex items-center cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                className="sr-only peer"
-                                                checked={previewQuestion.is_audited || false}
-                                                onChange={(e) => handleAuditQuestion(previewQuestion, e.target.checked)}
-                                            />
-                                            <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Import Questions Modal */}
-                {showImportQuestionsModal && (
-                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-8 animate-in zoom-in duration-200 overflow-y-auto max-h-[90vh]">
-                            <h3 className="text-xl font-bold mb-4 text-right">استيراد أسئلة (JS/JSON)</h3>
-                            <p className="text-sm text-slate-500 mb-6 text-right leading-relaxed">
-                                قم برفع ملف يحتوي على مصفوفة الأسئلة. النظام سيدعم صيغة JS Object أو JSON.<br />
-                                سيتم تجاهل دالة convertMathToLatex واستخراج النص بداخلها.
-                            </p>
-
-                            <div className="space-y-4 mb-8">
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-sm font-bold text-slate-500 mb-2 text-right">المادة (تخصص عام)</label>
-                                        <select
-                                            className="w-full p-3 rounded-xl border border-slate-200"
-                                            value={importConfig.master_subject_id}
-                                            onChange={e => setImportConfig({ ...importConfig, master_subject_id: e.target.value })}
-                                        >
-                                            <option value="">-- اختر المادة --</option>
-                                            {masterSubjects.map(ms => <option key={ms.id} value={ms.id}>{ms.name}</option>)}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-bold text-slate-500 mb-2 text-right">الصف الدراسي</label>
-                                        <select
-                                            className="w-full p-3 rounded-xl border border-slate-200"
-                                            value={importConfig.grade_id}
-                                            onChange={e => setImportConfig({ ...importConfig, grade_id: e.target.value })}
-                                        >
-                                            <option value="">-- اختر الصف --</option>
-                                            {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-bold text-slate-500 mb-2 text-right">الترم</label>
-                                        <select
-                                            className="w-full p-3 rounded-xl border border-slate-200"
-                                            value={importConfig.term}
-                                            onChange={e => setImportConfig({ ...importConfig, term: e.target.value })}
-                                        >
-                                            <option value="1">الترم الأول</option>
-                                            <option value="2">الترم الثاني</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-bold text-slate-500 mb-2 text-right">الأسبوع</label>
-                                        <select
-                                            className="w-full p-3 rounded-xl border border-slate-200"
-                                            value={importConfig.week}
-                                            onChange={e => setImportConfig({ ...importConfig, week: e.target.value })}
-                                        >
-                                            {Array.from({ length: 20 }, (_, i) => i + 1).map(week => (
-                                                <option key={week} value={week}>الأسبوع {week}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <div className="relative border-2 border-dashed border-slate-200 rounded-2xl p-8 hover:bg-slate-50 transition-all cursor-pointer group">
-                                    <input
-                                        type="file"
-                                        accept=".js,.json,.txt"
-                                        onChange={(e) => {
-                                            if (!importConfig.grade_id || !importConfig.master_subject_id) {
-                                                alert('يرجى اختيار المادة والصف أولاً')
-                                                e.target.value = null
-                                                return
-                                            }
-                                            const file = e.target.files[0]
-                                            if (file) {
-                                                const reader = new FileReader()
-                                                reader.onload = (event) => handleImportQuestions(event.target.result)
-                                                reader.readAsText(file)
-                                            }
-                                        }}
-                                        className="absolute inset-0 opacity-0 cursor-pointer"
-                                    />
-                                    <div className="text-center">
-                                        <div className="text-3xl mb-2 group-hover:scale-110 transition-transform">📂</div>
-                                        <div className="text-sm font-bold text-slate-600">اضغط لرفع ملف الأسئلة</div>
-                                        <div className="text-xs text-slate-400 mt-1">JS / JSON</div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="flex justify-end gap-3">
-                                <button
-                                    onClick={() => setShowImportQuestionsModal(false)}
-                                    className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
+                            {/* Filters */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+                                <select
+                                    value={qFilters.grade}
+                                    onChange={e => setQFilters({ ...qFilters, grade: e.target.value })}
+                                    className="p-3 rounded-xl border border-slate-200 text-sm bg-white"
                                 >
-                                    إلغاء
-                                </button>
+                                    <option value="">كل الصفوف</option>
+                                    {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                                </select>
+                                <select
+                                    value={qFilters.subject}
+                                    onChange={e => setQFilters({ ...qFilters, subject: e.target.value })}
+                                    className="p-3 rounded-xl border border-slate-200 text-sm bg-white"
+                                >
+                                    <option value="">كل المواد</option>
+                                    {subjects
+                                        .filter(s => !qFilters.grade || s.grade_id === qFilters.grade)
+                                        .map(s => (
+                                            <option key={s.id} value={s.id}>
+                                                {s.master_subjects?.name} {!qFilters.grade && `- ${s.grades?.name}`}
+                                            </option>
+                                        ))}
+                                </select>
+                                <select
+                                    value={qFilters.difficulty}
+                                    onChange={e => setQFilters({ ...qFilters, difficulty: e.target.value })}
+                                    className="p-3 rounded-xl border border-slate-200 text-sm bg-white"
+                                >
+                                    <option value="">كل المستويات</option>
+                                    <option value="easy">سهل</option>
+                                    <option value="medium">متوسط</option>
+                                    <option value="hard">صعب</option>
+                                    <option value="talented">متفوقين</option>
+                                </select>
+                                <select
+                                    value={qFilters.term}
+                                    onChange={e => setQFilters({ ...qFilters, term: e.target.value })}
+                                    className="p-3 rounded-xl border border-slate-200 text-sm bg-white"
+                                >
+                                    <option value="">كل الأترام</option>
+                                    <option value="1">الترم الأول</option>
+                                    <option value="2">الترم الثاني</option>
+                                </select>
+                                <select
+                                    value={qFilters.week}
+                                    onChange={e => setQFilters({ ...qFilters, week: e.target.value })}
+                                    className="p-3 rounded-xl border border-slate-200 text-sm bg-white font-bold text-brand-primary"
+                                >
+                                    <option value="">كل الأسابيع</option>
+                                    {[...Array(20)].map((_, i) => (
+                                        <option key={i + 1} value={i + 1}>الأسبوع {i + 1}</option>
+                                    ))}
+                                </select>
+                                <select
+                                    value={qFilters.audited || ''}
+                                    onChange={e => setQFilters({ ...qFilters, audited: e.target.value })}
+                                    className="p-3 rounded-xl border border-slate-200 text-sm bg-white font-bold"
+                                >
+                                    <option value="">كل الأسئلة</option>
+                                    <option value="true">مدققة فقط ✅</option>
+                                    <option value="false">غير مدققة فقط ⚠️</option>
+                                </select>
                             </div>
-                        </div>
-                    </div>
-                )
-                }
-                {/* Edit Competition Modal */}
-                {
-                    editingCompetition && (
-                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-                            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl p-8 animate-in zoom-in duration-200 my-8">
-                                <div className="flex justify-between items-start mb-6">
-                                    <button onClick={() => setEditingCompetition(null)} className="text-slate-400 hover:text-slate-600 p-2 bg-slate-50 rounded-xl transition-all">✕</button>
-                                    <div className="text-right">
-                                        <h3 className="text-2xl font-black text-slate-800">تعديل المسابقة</h3>
-                                        <p className="text-slate-500 text-sm font-bold">قم بتعديل بيانات المسابقة</p>
+
+                            {/* Analytical Statistics */}
+                            <div className="mb-8 animate-in fade-in slide-in-from-bottom duration-500">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <div className="h-6 w-1 bg-brand-primary rounded-full"></div>
+                                    <h4 className="font-black text-slate-700">إحصائيات تحليلية (حسب الفلتر) 📊</h4>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                                    <div className="glass-card p-4 rounded-2xl border-r-4 border-r-indigo-500 bg-indigo-50/30">
+                                        <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">عدد المسابقات</div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-2xl font-black text-indigo-600">
+                                                {competitions.filter(c => {
+                                                    const gradeMatch = !qFilters.grade || c.grade_id === qFilters.grade
+                                                    const subjectMatch = !qFilters.subject || c.subject_id === qFilters.subject
+                                                    const termMatch = !qFilters.term || c.term === parseInt(qFilters.term)
+                                                    const weekMatch = !qFilters.week || (parseInt(qFilters.week) >= c.start_week && parseInt(qFilters.week) <= c.end_week)
+                                                    return gradeMatch && subjectMatch && termMatch && weekMatch
+                                                }).length}
+                                            </span>
+                                            <span className="text-xs font-bold text-slate-500">مسابقة</span>
+                                        </div>
+                                    </div>
+                                    <div className="glass-card p-4 rounded-2xl border-r-4 border-r-green-500 bg-green-50/30">
+                                        <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">أسئلة سهلة</div>
+                                        <div className="text-2xl font-black text-green-600">
+                                            {filteredQuestions.filter(q => q.difficulty === 'easy').length}
+                                        </div>
+                                    </div>
+                                    <div className="glass-card p-4 rounded-2xl border-r-4 border-r-blue-500 bg-blue-50/30">
+                                        <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">أسئلة متوسطة</div>
+                                        <div className="text-2xl font-black text-blue-600">
+                                            {filteredQuestions.filter(q => q.difficulty === 'medium').length}
+                                        </div>
+                                    </div>
+                                    <div className="glass-card p-4 rounded-2xl border-r-4 border-r-rose-500 bg-rose-50/30">
+                                        <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">أسئلة صعبة</div>
+                                        <div className="text-2xl font-black text-rose-600">
+                                            {filteredQuestions.filter(q => q.difficulty === 'hard').length}
+                                        </div>
+                                    </div>
+                                    <div className="glass-card p-4 rounded-2xl border-r-4 border-r-purple-500 bg-purple-50/30">
+                                        <div className="text-[10px] font-bold text-slate-400 mb-1 uppercase">أسئلة متفوقين</div>
+                                        <div className="text-2xl font-black text-purple-600">
+                                            {filteredQuestions.filter(q => (q.difficulty === 'talented' || q.difficulty === 'متفوقين')).length}
+                                        </div>
                                     </div>
                                 </div>
-
-                                <form onSubmit={handleUpdateCompetition} className="space-y-6">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
-                                        <div className="md:col-span-2 lg:col-span-2">
-                                            <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">عنوان المسابقة</label>
-                                            <input
-                                                type="text" placeholder="مثال: مسابقة العباقرة - الأسبوع الأول" required
-                                                value={editingCompetition.title} onChange={e => setEditingCompetition({ ...editingCompetition, title: e.target.value })}
-                                                className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold"
-                                            />
-                                        </div>
-                                        <div className="lg:col-span-1">
-                                            <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">الصف الدراسي</label>
-                                            <select
-                                                required value={editingCompetition.grade_id} onChange={e => setEditingCompetition({ ...editingCompetition, grade_id: e.target.value })}
-                                                className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
-                                            >
-                                                <option value="">اختر الصف</option>
-                                                {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                                            </select>
-                                        </div>
-                                        <div className="lg:col-span-1">
-                                            <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">المادة</label>
-                                            <select
-                                                required value={editingCompetition.subject_id} onChange={e => setEditingCompetition({ ...editingCompetition, subject_id: e.target.value })}
-                                                className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
-                                            >
-                                                <option value="">اختر المادة</option>
-                                                {subjects.filter(s => s.grade_id === editingCompetition.grade_id).map(s => (
-                                                    <option key={s.id} value={s.id}>{s.master_subjects?.name}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div className="lg:col-span-1">
-                                            <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">الترم</label>
-                                            <select
-                                                value={editingCompetition.term} onChange={e => setEditingCompetition({ ...editingCompetition, term: parseInt(e.target.value) })}
-                                                className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
-                                            >
-                                                <option value={1}>الترم 1</option>
-                                                <option value={2}>الترم 2</option>
-                                            </select>
-                                        </div>
-                                        <div className="lg:col-span-1">
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <div>
-                                                    <label className="block text-[10px] font-bold text-slate-400 mb-2 mr-2">من أسبوع</label>
-                                                    <input
-                                                        type="number" min="1" max="20"
-                                                        value={editingCompetition.start_week} onChange={e => setEditingCompetition({ ...editingCompetition, start_week: parseInt(e.target.value) })}
-                                                        className="w-full p-4 px-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label className="block text-[10px] font-bold text-slate-400 mb-2 mr-2">إلى أسبوع</label>
-                                                    <input
-                                                        type="number" min="1" max="20"
-                                                        value={editingCompetition.end_week} onChange={e => setEditingCompetition({ ...editingCompetition, end_week: parseInt(e.target.value) })}
-                                                        className="w-full p-4 px-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Quotas Section */}
-                                    <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                                        <h4 className="text-sm font-black text-slate-500 mb-4 flex items-center gap-2">
-                                            <span>📊</span> توزيع صعوبة الأسئلة (الكيوتة)
-                                        </h4>
-                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                            {[
-                                                { key: 'easy_q', label: 'سهل (Easy)', color: 'green', diff: 'easy' },
-                                                { key: 'medium_q', label: 'متوسط (Medium)', color: 'blue', diff: 'medium' },
-                                                { key: 'hard_q', label: 'صعب (Hard)', color: 'rose', diff: 'hard' },
-                                                { key: 'talented_q', label: 'متفوقين (Talented)', color: 'purple', diff: 'talented' }
-                                            ].map(item => {
-                                                const available = getAvailableQuestions(item.diff, editingCompetition);
-                                                const requested = editingCompetition[item.key];
-                                                const isExceeded = requested > available;
-                                                return (
-                                                    <div key={item.key}>
-                                                        <label className={`block text-[10px] font-bold text-${item.color}-600 mb-1 mr-1`}>{item.label}</label>
-                                                        <input
-                                                            type="number" min="0"
-                                                            value={requested}
-                                                            onChange={e => setEditingCompetition({ ...editingCompetition, [item.key]: parseInt(e.target.value) || 0 })}
-                                                            className={`w-full p-3 rounded-xl border ${isExceeded ? 'border-red-500 bg-red-50' : 'border-slate-200'} text-center font-bold`}
-                                                        />
-                                                        <div className={`mt-1 text-[9px] font-bold text-right px-1 ${isExceeded ? 'text-red-600' : 'text-slate-400'}`}>
-                                                            متاح: {available} {isExceeded && '(غير كافٍ)'}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                        <div className="mt-4 text-[10px] text-slate-400 italic font-bold">
-                                            إجمالي الأسئلة: {editingCompetition.easy_q + editingCompetition.medium_q + editingCompetition.hard_q + editingCompetition.talented_q} سؤال سيتم اختيارها عشوائياً لكل طالب.
-                                        </div>
-                                    </div>
-
-                                    {/* Timer & Attempts Section */}
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                        <div className="bg-amber-50 p-6 rounded-2xl border border-amber-100">
-                                            <h4 className="text-sm font-black text-amber-700 mb-4 flex items-center gap-2">
-                                                <span>⏱️</span> نظام التوقيت
-                                            </h4>
-                                            <div className="space-y-3">
-                                                <label className="flex items-center gap-2 cursor-pointer">
-                                                    <input type="radio" name="edit_timer_type" value="total" checked={editingCompetition.timer_type === 'total'} onChange={e => setEditingCompetition({ ...editingCompetition, timer_type: e.target.value })} className="accent-amber-600" />
-                                                    <span className="text-xs font-bold text-amber-900">وقت كلي للمسابقة</span>
-                                                </label>
-                                                <label className="flex items-center gap-2 cursor-pointer">
-                                                    <input type="radio" name="edit_timer_type" value="per_question" checked={editingCompetition.timer_type === 'per_question'} onChange={e => setEditingCompetition({ ...editingCompetition, timer_type: e.target.value })} className="accent-amber-600" />
-                                                    <span className="text-xs font-bold text-amber-900">وقت محدد لكل سؤال</span>
-                                                </label>
-                                                <div className="mt-4">
-                                                    <label className="block text-[10px] font-bold text-amber-600 mb-1 mr-1">
-                                                        {editingCompetition.timer_type === 'total' ? 'المدة الكلية (بالدقائق)' : 'وقت السؤال الواحد (بالدقائق)'}
-                                                    </label>
-                                                    <input
-                                                        type="number"
-                                                        value={Math.floor(editingCompetition.duration / 60)}
-                                                        onChange={e => {
-                                                            const mins = parseInt(e.target.value) || 0;
-                                                            setEditingCompetition({ ...editingCompetition, duration: mins * 60 });
-                                                        }}
-                                                        className="w-full p-3 rounded-xl border border-amber-200 bg-white text-center font-bold text-amber-900"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="md:col-span-2 bg-slate-50 p-6 rounded-2xl border border-slate-100 flex flex-col justify-between">
-                                            <div>
-                                                <h4 className="text-sm font-black text-slate-700 mb-4 flex items-center gap-2">
-                                                    <span>🔄</span> إعدادات المحاولات
-                                                </h4>
-                                                <div className="flex items-center gap-4">
-                                                    <div className="flex-1">
-                                                        <label className="block text-[10px] font-bold text-slate-400 mb-1 mr-1">الحد الأقصى للمحاولات</label>
-                                                        <input type="number" min="1" value={editingCompetition.max_attempts} onChange={e => setEditingCompetition({ ...editingCompetition, max_attempts: parseInt(e.target.value) })} className="w-full p-4 rounded-xl border border-slate-200 text-center font-black text-slate-800" />
-                                                    </div>
-                                                    <p className="flex-1 text-xs text-slate-400 leading-tight">
-                                                        يتحكم هذا الخيار في عدد المرات التي يسمح فيها للطالب بدخول هذه المسابقة.
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <div className="flex gap-3 mt-6">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setEditingCompetition(null)}
-                                                    className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
-                                                >
-                                                    إلغاء
-                                                </button>
-                                                <button type="submit" className="flex-1 py-4 bg-brand-primary text-white rounded-xl font-black shadow-lg hover:scale-[1.01] transition-all flex items-center justify-center gap-3">
-                                                    <span>💾</span> حفظ التعديلات
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    )
-                }
-                {/* Competition Results Modal */}
-                {
-                    showResultsModal && selectedCompetitionResults && (
-                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl p-8 animate-in zoom-in duration-200 overflow-y-auto max-h-[90vh]">
-                                <div className="flex justify-between items-start mb-6">
-                                    <button onClick={() => setShowResultsModal(false)} className="text-slate-400 hover:text-slate-600 p-2 bg-slate-50 rounded-xl transition-all">✕</button>
-                                    <div className="text-right">
-                                        <h3 className="text-2xl font-black text-slate-800">نتائج المسابقة: {selectedCompetitionResults.title}</h3>
-                                        <p className="text-slate-500 font-bold">الصف: {selectedCompetitionResults.grades?.name} | المادة: {selectedCompetitionResults.subjects?.master_subjects?.name}</p>
-                                    </div>
-                                </div>
-
-                                <Leaderboard competitionId={selectedCompetitionResults.id} />
-
-                                <div className="mt-8 flex justify-end">
-                                    <button
-                                        onClick={() => setShowResultsModal(false)}
-                                        className="px-8 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
-                                    >
-                                        إغلاق
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )
-                }
-
-                {/* Security Verification Modal */}
-                {
-                    showVerifyModal && (
-                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
-                            <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-sm p-8 text-center border border-slate-100 animate-in zoom-in duration-300">
-                                <div className="w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-6">
-                                    <span className="text-4xl">🔐</span>
-                                </div>
-                                <h3 className="text-2xl font-black text-slate-800 mb-2">تأكيد الهوية</h3>
-                                <p className="text-slate-500 text-sm mb-8 leading-relaxed">
-                                    يرجى إدخال كلمة المرور الحالية لمدير النظام لتأكيد هذه العملية الحساسة.
-                                </p>
-
-                                <input
-                                    type="password"
-                                    autoFocus
-                                    value={verifyPasswordValue}
-                                    onChange={e => setVerifyPasswordValue(e.target.value)}
-                                    onKeyDown={e => e.key === 'Enter' && handleVerifySecurityChallenge()}
-                                    placeholder="كلمة المرور الحالية"
-                                    className="w-full p-5 bg-slate-50 rounded-2xl border-2 border-slate-100 outline-none focus:border-brand-primary transition-all text-center text-lg mb-6"
-                                />
-
-                                <div className="flex flex-col gap-3">
-                                    <button
-                                        onClick={handleVerifySecurityChallenge}
-                                        className="w-full py-4 bg-brand-primary text-white rounded-2xl font-black shadow-lg shadow-brand-primary/20 hover:scale-[1.02] active:scale-95 transition-all"
-                                    >
-                                        تأكيد وإرسال
-                                    </button>
-                                    <button
-                                        onClick={() => { setShowVerifyModal(false); setVerifyCallback(null); }}
-                                        className="w-full py-4 text-slate-400 font-bold hover:text-slate-600 transition-all"
-                                    >
-                                        إلغاء العملية
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )
-                }
-
-
-                {/* Score Audit Modal */}
-                {showAuditScoresModal && (
-                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col animate-in zoom-in duration-200">
-                            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                                <div>
-                                    <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                                        <span>⚖️</span> تدقيق درجات الأسئلة
-                                    </h3>
-                                    <p className="text-sm text-slate-500 mt-1">عرض الأسئلة التي تختلف درجتها عن القاعدة المحددة (صعوبة = درجة)</p>
-                                </div>
-                                <button onClick={() => setShowAuditScoresModal(false)} className="w-8 h-8 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded-full transition-colors text-slate-500">✕</button>
                             </div>
 
-                            <div className="p-6 overflow-y-auto flex-1">
-                                {scoreMismatches.length === 0 ? (
-                                    <div className="text-center py-12">
-                                        <div className="text-4xl mb-4">✅</div>
-                                        <h3 className="text-lg font-bold text-slate-700">لا توجد مخالفات!</h3>
-                                        <p className="text-slate-500">جميع الأسئلة في قاعدة البيانات متوافقة مع مصفوفة الدرجات.</p>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4">
-                                        <div className="flex justify-between items-center bg-amber-50 p-4 rounded-xl border border-amber-100 text-amber-800 text-sm font-bold">
-                                            <span>⚠️ تم العثور على {scoreMismatches.length} سؤال بحاجة لتصحيح.</span>
-                                            <button
-                                                onClick={correctAllScoreMismatches}
-                                                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg shadow transition-all"
-                                            >
-                                                تصحيح الكل تلقائياً
-                                            </button>
-                                        </div>
-
-                                        <table className="w-full text-right text-sm">
-                                            <thead className="bg-slate-50 text-slate-500 font-bold">
-                                                <tr>
-                                                    <th className="p-4 rounded-r-xl">السؤال</th>
-                                                    <th className="p-4">الصف / المادة</th>
-                                                    <th className="p-4">الصعوبة</th>
-                                                    <th className="p-4">الدرجة الحالية</th>
-                                                    <th className="p-4">الدرجة المستحقة</th>
-                                                    <th className="p-4 rounded-l-xl">الإجراء</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-100">
-                                                {scoreMismatches.map(q => (
-                                                    <tr key={q.id} className="hover:bg-slate-50 transition-colors">
-                                                        <td className="p-4 max-w-xs truncate font-medium text-slate-700" title={q.content?.question}>
-                                                            {convertMathToLatex(q.content?.question || '---')}
-                                                        </td>
-                                                        <td className="p-4 text-slate-500 text-xs">
-                                                            {grades.find(g => g.id === q.grade_id)?.name} - {subjects.find(s => s.id === q.subject_id)?.master_subjects?.name}
-                                                        </td>
-                                                        <td className="p-4">
-                                                            <span className={`px-2 py-1 rounded text-xs font-bold 
-                                                                ${q.difficulty === 'easy' ? 'bg-green-100 text-green-700' :
-                                                                    q.difficulty === 'medium' ? 'bg-blue-100 text-blue-700' :
-                                                                        q.difficulty === 'hard' ? 'bg-rose-100 text-rose-700' : 'bg-purple-100 text-purple-700'}`}>
-                                                                {q.difficulty}
-                                                            </span>
-                                                        </td>
-                                                        <td className="p-4 font-mono font-bold text-red-500">{q.content?.score || 'لا يوجد'}</td>
-                                                        <td className="p-4 font-mono font-bold text-green-600">{q.expectedScore}</td>
-                                                        <td className="p-4">
-                                                            <button
-                                                                onClick={() => correctScoreMismatch(q)}
-                                                                className="px-3 py-1 bg-white border border-slate-200 hover:border-brand-primary hover:bg-brand-primary hover:text-white text-slate-600 rounded-lg transition-all text-xs font-bold shadow-sm"
-                                                            >
-                                                                تصحيح
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                )}
-                {/* Poll Details Modal */}
-                {showPollDetailsModal && (
-                    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto">
-                        <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-4xl p-8 animate-in zoom-in duration-300 relative max-h-[90vh] flex flex-col">
-                            <button
-                                onClick={() => setShowPollDetailsModal(null)}
-                                className="absolute top-6 left-6 text-slate-400 hover:text-slate-600 transition-all text-xl"
-                            >
-                                ✕
-                            </button>
-
-                            <div className="mb-6 text-right">
-                                <h2 className="text-2xl font-black text-slate-800 mb-2">{showPollDetailsModal.question}</h2>
-                                <p className="text-slate-500 font-bold">تفاصيل الطلاب الذين قاموا بالتصويت</p>
-                            </div>
-
-                            <div className="overflow-y-auto flex-1 pr-2">
-                                <table className="w-full text-right">
-                                    <thead className="sticky top-0 bg-white z-10 border-b-2 border-slate-100">
-                                        <tr className="text-slate-400 text-xs font-black uppercase tracking-wider">
-                                            <th className="p-4">اسم الطالب</th>
-                                            <th className="p-4">المدرسة</th>
-                                            <th className="p-4">الاختيار</th>
-                                            <th className="p-4">وقت التصويت</th>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-right text-sm">
+                                    <thead className="bg-slate-50 text-slate-400 font-bold border-b">
+                                        <tr>
+                                            <th className="p-4">نص السؤال</th>
+                                            <th className="p-4">المادة/الصف</th>
+                                            <th className="p-4">المستوى</th>
+                                            <th className="p-4 text-center">حالة التدقيق</th>
+                                            <th className="p-4 text-center">الإجراءات</th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-slate-50">
-                                        {pollResponses
-                                            .filter(r => r.poll_id === showPollDetailsModal.id)
-                                            .map((resp, i) => (
-                                                <tr key={i} className="hover:bg-slate-50 transition-all">
-                                                    <td className="p-4 font-bold text-slate-700">{resp.students?.name || 'طالب غير معروف'}</td>
-                                                    <td className="p-4 text-xs text-slate-500">{resp.students?.schools?.name || '---'}</td>
-                                                    <td className="p-4">
-                                                        <span className="px-3 py-1 bg-brand-primary/10 text-brand-primary rounded-lg font-black text-xs">
-                                                            {showPollDetailsModal.options[resp.option_index]}
-                                                        </span>
-                                                    </td>
-                                                    <td className="p-4 text-xs text-slate-400 font-mono">
-                                                        {new Date(resp.created_at).toLocaleString('ar-EG')}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        {pollResponses.filter(r => r.poll_id === showPollDetailsModal.id).length === 0 && (
+                                    <tbody className="divide-y divide-slate-100">
+                                        {filteredQuestions.map(q => (
+                                            <tr key={q.id} className="hover:bg-slate-50 transition-colors">
+                                                <td className="p-4 max-w-xs truncate font-bold text-slate-700" dangerouslySetInnerHTML={{ __html: convertMathToLatex(q.content?.question || '---') }}></td>
+                                                <td className="p-4 text-xs text-slate-500">
+                                                    {q.subjects?.master_subjects?.name || '---'} <br />
+                                                    <span className="text-[10px] opacity-70">{q.grades?.name || '---'} - الترم {q.term}</span>
+                                                </td>
+                                                <td className="p-4">
+                                                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${q.difficulty === 'easy' ? 'bg-green-100 text-green-700' :
+                                                        q.difficulty === 'medium' ? 'bg-blue-100 text-blue-700' :
+                                                            q.difficulty === 'hard' ? 'bg-rose-100 text-rose-700' : 'bg-purple-100 text-purple-700'
+                                                        }`}>
+                                                        {q.difficulty === 'easy' ? 'سهل' : q.difficulty === 'medium' ? 'متوسط' : q.difficulty === 'hard' ? 'صعب' : 'متفوقين'}
+                                                    </span>
+                                                </td>
+                                                <td className="p-4 text-center">
+                                                    <span className={`px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1 ${q.is_audited ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                                                        }`}>
+                                                        {q.is_audited ? '✅ مدقق' : '⚠️ غير مدقق'}
+                                                    </span>
+                                                </td>
+                                                <td className="p-4">
+                                                    <div className="flex justify-center gap-2">
+                                                        <button onClick={() => setPreviewQuestion(q)} className="p-1 hover:bg-blue-50 text-blue-500 rounded" title="معاينة">👁️</button>
+                                                        <button onClick={() => setEditingQuestion(q)} className="p-1 hover:bg-slate-200 rounded" title="تعديل">📝</button>
+                                                        <button onClick={() => handleDeleteQuestion(q.id)} className="p-1 hover:bg-red-50 text-red-500 rounded" title="حذف">🗑️</button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {filteredQuestions.length === 0 && (
                                             <tr>
-                                                <td colSpan="4" className="p-12 text-center text-slate-400 italic">لا توجد ردود مسجلة لهذا التصويت بعد.</td>
+                                                <td colSpan="5" className="p-12 text-center text-slate-400 italic">لا توجد أسئلة تطابق هذه الفلاتر</td>
                                             </tr>
                                         )}
                                     </tbody>
                                 </table>
                             </div>
-                        </div>
-                    </div>
-                )}
-            </div >
-        </div >
+                        </div >
+                    )
+                    }
+
+                    {
+                        activeTab === 'competitions' && (
+                            <div className="space-y-8 animate-in fade-in slide-in-from-right duration-300">
+                                {/* Competition Builder Card */}
+                                <div className="glass-card p-8 rounded-3xl shadow-sm border border-slate-200">
+                                    <h3 className="text-xl font-bold mb-6 text-slate-800">إنشاء مسابقة جديدة 🏗️</h3>
+                                    <form onSubmit={handleAddCompetition} className="space-y-6">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+                                            <div className="md:col-span-2 lg:col-span-2">
+                                                <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">عنوان المسابقة</label>
+                                                <input
+                                                    type="text" placeholder="مثال: مسابقة العبافرة - الأسبوع الأول" required
+                                                    value={newCompetition.title} onChange={e => setNewCompetition({ ...newCompetition, title: e.target.value })}
+                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold"
+                                                />
+                                            </div>
+                                            <div className="lg:col-span-1">
+                                                <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">الصف الدراسي</label>
+                                                <select
+                                                    required value={newCompetition.grade_id} onChange={e => setNewCompetition({ ...newCompetition, grade_id: e.target.value })}
+                                                    className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
+                                                >
+                                                    <option value="">اختر الصف</option>
+                                                    {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                                                </select>
+                                            </div>
+                                            <div className="lg:col-span-1">
+                                                <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">المادة</label>
+                                                <select
+                                                    required value={newCompetition.subject_id} onChange={e => setNewCompetition({ ...newCompetition, subject_id: e.target.value })}
+                                                    className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
+                                                >
+                                                    <option value="">اختر المادة</option>
+                                                    {subjects.filter(s => s.grade_id === newCompetition.grade_id).map(s => (
+                                                        <option key={s.id} value={s.id}>{s.master_subjects?.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div className="lg:col-span-1">
+                                                <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">الترم</label>
+                                                <select
+                                                    value={newCompetition.term} onChange={e => setNewCompetition({ ...newCompetition, term: parseInt(e.target.value) })}
+                                                    className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
+                                                >
+                                                    <option value={1}>الترم 1</option>
+                                                    <option value={2}>الترم 2</option>
+                                                </select>
+                                            </div>
+                                            <div className="lg:col-span-1">
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <div>
+                                                        <label className="block text-[10px] font-bold text-slate-400 mb-2 mr-2">من أسبوع</label>
+                                                        <input
+                                                            type="number" min="1" max="20"
+                                                            value={newCompetition.start_week} onChange={e => setNewCompetition({ ...newCompetition, start_week: parseInt(e.target.value) })}
+                                                            className="w-full p-4 px-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[10px] font-bold text-slate-400 mb-2 mr-2">إلى أسبوع</label>
+                                                        <input
+                                                            type="number" min="1" max="20"
+                                                            value={newCompetition.end_week} onChange={e => setNewCompetition({ ...newCompetition, end_week: parseInt(e.target.value) })}
+                                                            className="w-full p-4 px-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Quotas Section */}
+                                        <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                                            <h4 className="text-sm font-black text-slate-500 mb-4 flex items-center gap-2">
+                                                <span>📊</span> توزيع صعوبة الأسئلة (الكيوتة)
+                                            </h4>
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                {[
+                                                    { key: 'easy_q', label: 'سهل (Easy)', color: 'green', diff: 'easy' },
+                                                    { key: 'medium_q', label: 'متوسط (Medium)', color: 'blue', diff: 'medium' },
+                                                    { key: 'hard_q', label: 'صعب (Hard)', color: 'rose', diff: 'hard' },
+                                                    { key: 'talented_q', label: 'متفوقين (Talented)', color: 'purple', diff: 'talented' }
+                                                ].map(item => {
+                                                    const available = getAvailableQuestions(item.diff);
+                                                    const requested = newCompetition[item.key];
+                                                    const isExceeded = requested > available;
+                                                    return (
+                                                        <div key={item.key}>
+                                                            <label className={`block text-[10px] font-bold text-${item.color}-600 mb-1 mr-1`}>{item.label}</label>
+                                                            <input
+                                                                type="number" min="0"
+                                                                value={requested}
+                                                                onChange={e => setNewCompetition({ ...newCompetition, [item.key]: parseInt(e.target.value) || 0 })}
+                                                                className={`w-full p-3 rounded-xl border ${isExceeded ? 'border-red-500 bg-red-50' : 'border-slate-200'} text-center font-bold`}
+                                                            />
+                                                            <div className={`mt-1 text-[9px] font-bold text-right px-1 ${isExceeded ? 'text-red-600' : 'text-slate-400'}`}>
+                                                                متاح: {available} {isExceeded && '(غير كافٍ)'}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            <div className="mt-4 text-[10px] text-slate-400 italic font-bold">
+                                                إجمالي الأسئلة: {newCompetition.easy_q + newCompetition.medium_q + newCompetition.hard_q + newCompetition.talented_q} سؤال سيتم اختيارها عشوائياً لكل طالب.
+                                            </div>
+                                        </div>
+
+                                        {/* Timer & Attempts Section */}
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                            <div className="bg-amber-50 p-6 rounded-2xl border border-amber-100">
+                                                <h4 className="text-sm font-black text-amber-700 mb-4 flex items-center gap-2">
+                                                    <span>⏱️</span> نظام التوقيت
+                                                </h4>
+                                                <div className="space-y-3">
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <input type="radio" name="timer_type" value="total" checked={newCompetition.timer_type === 'total'} onChange={e => setNewCompetition({ ...newCompetition, timer_type: e.target.value })} className="accent-amber-600" />
+                                                        <span className="text-xs font-bold text-amber-900">وقت كلي للمسابقة</span>
+                                                    </label>
+                                                    <label className="flex items-center gap-2 cursor-pointer">
+                                                        <input type="radio" name="timer_type" value="per_question" checked={newCompetition.timer_type === 'per_question'} onChange={e => setNewCompetition({ ...newCompetition, timer_type: e.target.value })} className="accent-amber-600" />
+                                                        <span className="text-xs font-bold text-amber-900">وقت محدد لكل سؤال</span>
+                                                    </label>
+                                                    <div className="mt-4">
+                                                        <label className="block text-[10px] font-bold text-amber-600 mb-1 mr-1">
+                                                            {newCompetition.timer_type === 'total' ? 'المدة الكلية (بالدقائق)' : 'وقت السؤال الواحد (بالدقائق)'}
+                                                        </label>
+                                                        <input
+                                                            type="number"
+                                                            value={Math.floor(newCompetition.duration / 60)}
+                                                            onChange={e => {
+                                                                const mins = parseInt(e.target.value) || 0;
+                                                                setNewCompetition({ ...newCompetition, duration: mins * 60 });
+                                                            }}
+                                                            className="w-full p-3 rounded-xl border border-amber-200 bg-white text-center font-bold text-amber-900"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="md:col-span-2 bg-slate-50 p-6 rounded-2xl border border-slate-100 flex flex-col justify-between">
+                                                <div>
+                                                    <h4 className="text-sm font-black text-slate-700 mb-4 flex items-center gap-2">
+                                                        <span>🔄</span> إعدادات المحاولات
+                                                    </h4>
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="flex-1">
+                                                            <label className="block text-[10px] font-bold text-slate-400 mb-1 mr-1">الحد الأقصى للمحاولات</label>
+                                                            <input type="number" min="1" value={newCompetition.max_attempts} onChange={e => setNewCompetition({ ...newCompetition, max_attempts: parseInt(e.target.value) })} className="w-full p-4 rounded-xl border border-slate-200 text-center font-black text-slate-800" />
+                                                        </div>
+                                                        <p className="flex-1 text-xs text-slate-400 leading-tight">
+                                                            يتحكم هذا الخيار في عدد المرات التي يسمح فيها للطالب بدخول هذه المسابقة.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <button type="submit" className="mt-6 w-full py-4 bg-slate-800 text-white rounded-xl font-black shadow-lg hover:bg-brand-primary hover:scale-[1.01] transition-all flex items-center justify-center gap-3">
+                                                    <span>🚀</span> إنشاء المسابقة وتفعيلها لاحقاً
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </form>
+                                </div>
+
+                                {/* Competitions List */}
+                                <div className="glass-card rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+                                    <div className="p-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                                        <h3 className="font-black text-slate-700 text-lg flex items-center gap-2">
+                                            <span>🏁</span> المسابقات الجارية والسابقة
+                                        </h3>
+                                        <div className="relative">
+                                            <input
+                                                type="text" placeholder="بحث باسم المسابقة..."
+                                                value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+                                                className="p-2 pr-10 rounded-xl border border-slate-200 text-xs outline-none focus:ring-2 focus:ring-brand-primary"
+                                            />
+                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 opacity-30">🔍</span>
+                                        </div>
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-right">
+                                            <thead className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase">
+                                                <tr>
+                                                    <th className="p-4">المسابقة</th>
+                                                    <th className="p-4">الصف / المادة</th>
+                                                    <th className="p-4">توزيع الأسئلة</th>
+                                                    <th className="p-4">نظام التوقيت</th>
+                                                    <th className="p-4">المحاولات</th>
+                                                    <th className="p-4 text-center">الحالة</th>
+                                                    <th className="p-4 text-center">الإجراءات</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100 bg-white">
+                                                {filteredCompetitions.map(comp => (
+                                                    <tr key={comp.id} className="hover:bg-slate-50 transition-colors">
+                                                        <td className="p-4">
+                                                            <div className="font-black text-slate-800">{comp.title}</div>
+                                                            <div className="text-[10px] text-slate-400">تاريخ الإنشاء: {new Date(comp.created_at).toLocaleDateString()}</div>
+                                                        </td>
+                                                        <td className="p-4">
+                                                            <div className="text-xs font-bold text-slate-600">{comp.grades?.name}</div>
+                                                            <div className="text-[10px] text-brand-primary font-black">
+                                                                {comp.subjects?.master_subjects?.name} - {comp.start_week === comp.end_week ? `الأسبوع ${comp.start_week}` : `الأسابيع ${comp.start_week}-${comp.end_week}`}
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-4">
+                                                            <div className="flex gap-1">
+                                                                <span className="px-1.5 py-0.5 bg-green-50 text-green-700 rounded text-[9px] font-bold border border-green-100">S:{comp.easy_q}</span>
+                                                                <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-[9px] font-bold border border-blue-100">M:{comp.medium_q}</span>
+                                                                <span className="px-1.5 py-0.5 bg-rose-50 text-rose-700 rounded text-[9px] font-bold border border-rose-100">H:{comp.hard_q}</span>
+                                                                <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[9px] font-bold border border-purple-100">T:{comp.talented_q}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-4">
+                                                            <div className="text-[10px] font-bold text-slate-500">
+                                                                {comp.timer_type === 'total' ? '⏱️ وقت كلي:' : '⏱️ لكل سؤال:'} <span className="text-slate-800">{comp.duration / 60}د</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-4 text-center font-black text-slate-700">{comp.max_attempts}</td>
+                                                        <td className="p-4 text-center">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleToggleCompetition(comp)}
+                                                                className={`px-3 py-1 rounded-full text-[10px] font-black transition-all ${comp.is_active ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
+                                                            >
+                                                                {comp.is_active ? '✅ نشطة' : '🛑 معطلة'}
+                                                            </button>
+                                                        </td>
+                                                        <td className="p-4">
+                                                            <div className="flex justify-center gap-2">
+                                                                <button type="button" onClick={() => setEditingCompetition(comp)} className="p-2 hover:bg-amber-50 text-amber-600 rounded-lg transition-colors" title="تعديل المسابقة">✏️</button>
+                                                                <button type="button" onClick={() => { setSelectedCompetitionResults(comp); setShowResultsModal(true); }} className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg transition-colors" title="استعراض النتائج">📊</button>
+                                                                <button type="button" onClick={() => handleDeleteCompetition(comp.id)} className="p-2 hover:bg-red-50 text-red-600 rounded-lg transition-colors" title="حذف بالكامل">🗑️</button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {filteredCompetitions.length === 0 && (
+                                                    <tr>
+                                                        <td colSpan="7" className="p-12 text-center text-slate-400 italic">لا توجد مسابقات حالياً. ابدأ بإنشاء واحدة!</td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                    )}
+
+                                {activeTab === 'hall_of_fame' && (
+                                    <div className="space-y-8 animate-in fade-in slide-in-from-right duration-300">
+                                        {/* HOF Navigation & Filters */}
+                                        <div className="glass-card p-6 rounded-3xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-center justify-between">
+                                            <div className="flex bg-slate-100 p-1.5 rounded-2xl">
+                                                <button
+                                                    onClick={() => setHofMode('competition')}
+                                                    className={`px-6 py-2.5 rounded-xl font-black transition-all ${hofMode === 'competition' ? 'bg-white text-brand-primary shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                                                >
+                                                    لوحة مسابقة محددة
+                                                </button>
+                                                <button
+                                                    onClick={() => setHofMode('cumulative')}
+                                                    className={`px-6 py-2.5 rounded-xl font-black transition-all ${hofMode === 'cumulative' ? 'bg-white text-brand-primary shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                                                >
+                                                    اللوحة التراكمية
+                                                </button>
+                                            </div>
+
+                                            <div className="flex flex-wrap gap-3 items-center">
+                                                <select
+                                                    value={hofSelectedGrade} onChange={e => setHofSelectedGrade(e.target.value)}
+                                                    className="p-3 rounded-xl border border-slate-200 bg-white font-bold text-xs outline-none"
+                                                >
+                                                    <option value="">كل الصفوف</option>
+                                                    {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                                                </select>
+
+                                                {hofMode === 'competition' && (
+                                                    <select
+                                                        value={hofSelectedCompetition} onChange={e => setHofSelectedCompetition(e.target.value)}
+                                                        className="p-3 rounded-xl border border-slate-200 bg-white font-bold text-xs outline-none max-w-[200px]"
+                                                    >
+                                                        <option value="">اختر المسابقة</option>
+                                                        {competitions.filter(c => !hofSelectedGrade || c.grade_id === hofSelectedGrade).map(c => (
+                                                            <option key={c.id} value={c.id}>{c.title}</option>
+                                                        ))}
+                                                    </select>
+                                                )}
+
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] font-bold text-slate-400">العدد:</span>
+                                                    <input
+                                                        type="number" value={hofLimit} onChange={e => setHofLimit(parseInt(e.target.value) || 10)}
+                                                        className="w-16 p-2 rounded-xl border border-slate-200 text-center font-bold text-xs"
+                                                    />
+                                                </div>
+
+                                                <button
+                                                    onClick={handleDeleteHofRecords}
+                                                    className="p-3 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl transition-all"
+                                                    title="مسح السجلات المعروضة"
+                                                >
+                                                    🗑️ مسح
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Leaderboard Table */}
+                                        <div className="glass-card rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+                                            <div className="p-6 bg-slate-50 border-b border-slate-200 flex items-center gap-3">
+                                                <div className="text-2xl">🏆</div>
+                                                <h3 className="font-black text-slate-700 text-lg">
+                                                    {hofMode === 'competition' ? 'أوائل المسابقة' : 'الأوائل التراكمي (إجمالي النقاط)'}
+                                                </h3>
+                                            </div>
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full text-right">
+                                                    <thead className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase">
+                                                        <tr>
+                                                            <th className="p-4 text-center">المركز</th>
+                                                            <th className="p-4">الطالب</th>
+                                                            <th className="p-4">المدرسة</th>
+                                                            <th className="p-4">الصف - الفصل</th>
+                                                            <th className="p-4 text-center">{hofMode === 'cumulative' ? 'إجمالي النقاط' : 'الدرجة'}</th>
+                                                            {hofMode === 'competition' && <th className="p-4 text-center">الوقت المستغرق</th>}
+                                                            {hofMode === 'cumulative' && <th className="p-4 text-center">عدد المحاولات</th>}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-100 bg-white">
+                                                        {getHofLeaderboard().map((row, index) => {
+                                                            const student = hofMode === 'cumulative' ? row.student : row.students;
+                                                            const rank = index + 1;
+                                                            const isMedal = rank <= 3;
+                                                            const medalEmoji = rank === 1 ? '🥇' : rank === 2 ? '🥈' : '🥉';
+
+                                                            return (
+                                                                <tr key={hofMode === 'cumulative' ? student?.id : row.id} className={`${isMedal ? 'bg-amber-50/30' : ''} hover:bg-slate-50 transition-colors`}>
+                                                                    <td className="p-4 text-center">
+                                                                        <div className={`inline-flex items-center justify-center w-8 h-8 rounded-full font-black text-sm ${isMedal ? 'text-2xl' : 'bg-slate-100 text-slate-500'}`}>
+                                                                            {isMedal ? medalEmoji : rank}
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="p-4">
+                                                                        <div className="font-black text-slate-800">{student?.name || 'مستخدم غير معروف'}</div>
+                                                                    </td>
+                                                                    <td className="p-4">
+                                                                        <div className="text-xs font-bold text-slate-500">{student?.schools?.name || '---'}</div>
+                                                                    </td>
+                                                                    <td className="p-4">
+                                                                        <div className="text-xs font-bold text-slate-600">
+                                                                            {student?.grades?.name} {student?.class_name && `- ${student.class_name}`}
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="p-4 text-center">
+                                                                        <div className={`font-black text-lg ${rank === 1 ? 'text-amber-600' : 'text-slate-700'}`}>
+                                                                            {row.score}
+                                                                        </div>
+                                                                    </td>
+                                                                    {hofMode === 'competition' && (
+                                                                        <td className="p-4 text-center">
+                                                                            <div className="text-xs font-bold text-slate-400">
+                                                                                {Math.floor(row.time_spent / 60)}د {row.time_spent % 60}ث
+                                                                            </div>
+                                                                        </td>
+                                                                    )}
+                                                                    {hofMode === 'cumulative' && (
+                                                                        <td className="p-4 text-center">
+                                                                            <div className="text-sm font-bold text-slate-500">
+                                                                                {row.count} محاولة
+                                                                            </div>
+                                                                        </td>
+                                                                    )}
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                        {getHofLeaderboard().length === 0 && (
+                                                            <tr>
+                                                                <td colSpan={6} className="p-12 text-center text-slate-400 italic">
+                                                                    لا توجد بيانات متاحة حالياً للعرض.
+                                                                </td>
+                                                            </tr>
+                                                        )}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                    )}
+
+                                        {activeTab === 'polls' && (
+                                            <div className="space-y-8 animate-in fade-in slide-in-from-right duration-300">
+                                                <div className="glass-card p-8 rounded-3xl shadow-sm border border-slate-200 min-w-full">
+                                                    <h3 className="text-xl font-bold mb-6 text-slate-800">إنشاء تصويت جديد</h3>
+                                                    <form onSubmit={handleAddPoll} className="space-y-6">
+                                                        <div className="grid grid-cols-1 gap-4">
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2 mr-1">توجيه التصويت لـ:</label>
+                                                                    <select
+                                                                        value={newPoll.school_id || ''}
+                                                                        onChange={e => setNewPoll({ ...newPoll, school_id: e.target.value || null })}
+                                                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right font-bold bg-white"
+                                                                    >
+                                                                        <option value="">كافة المدارس (عام) 🌍</option>
+                                                                        {schools.map(school => (
+                                                                            <option key={school.id} value={school.id}>{school.name}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2 mr-1">سؤال التصويت:</label>
+                                                                    <input
+                                                                        type="text" placeholder="مثال: ما رأيك في صعوبة مسابقة هذا الأسبوع؟" required
+                                                                        value={newPoll.question} onChange={e => setNewPoll({ ...newPoll, question: e.target.value })}
+                                                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right font-bold"
+                                                                    />
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="space-y-3">
+                                                                <label className="block text-sm font-bold text-slate-500 mr-1">خيارات التصويت:</label>
+                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                                    {newPoll.options.map((option, idx) => (
+                                                                        <div key={idx} className="flex gap-2">
+                                                                            <input
+                                                                                type="text" placeholder={`الخيار ${idx + 1}`} required
+                                                                                value={option} onChange={e => {
+                                                                                    const next = [...newPoll.options]
+                                                                                    next[idx] = e.target.value
+                                                                                    setNewPoll({ ...newPoll, options: next })
+                                                                                }}
+                                                                                className="flex-1 p-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right"
+                                                                            />
+                                                                            {newPoll.options.length > 2 && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => setNewPoll({ ...newPoll, options: newPoll.options.filter((_, i) => i !== idx) })}
+                                                                                    className="p-3 text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                                                                                >
+                                                                                    ✕
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
+                                                                    ))}
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setNewPoll({ ...newPoll, options: [...newPoll.options, ''] })}
+                                                                        className="p-3 border-2 border-dashed border-slate-200 text-slate-400 rounded-xl font-bold hover:border-brand-primary hover:text-brand-primary transition-all"
+                                                                    >
+                                                                        + إضافة خيار جديد
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+
+                                                            <button type="submit" className="bg-slate-800 text-white rounded-xl font-bold hover:bg-brand-primary transition-all shadow-md py-4 mt-2">
+                                                                نشر التصويت للطلاب
+                                                            </button>
+                                                        </div>
+                                                    </form>
+                                                </div>
+
+                                                <div className="glass-card rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+                                                    <div className="p-6 bg-slate-50 border-b border-slate-200">
+                                                        <h3 className="font-bold text-slate-700 text-lg">التصويتات الحالية والنتائج</h3>
+                                                    </div>
+                                                    <div className="divide-y divide-slate-100">
+                                                        {polls.map(poll => {
+                                                            const results = pollResults[poll.id] || {}
+                                                            const totalVotes = Object.values(results).reduce((a, b) => a + b, 0)
+
+                                                            return (
+                                                                <div key={poll.id} className="p-8 hover:bg-slate-50 transition-all">
+                                                                    <div className="flex justify-between items-start mb-6">
+                                                                        <div className="flex gap-3">
+                                                                            <button
+                                                                                onClick={() => handleDeletePoll(poll.id)}
+                                                                                className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                                                                                title="حذف"
+                                                                            >
+                                                                                🗑️
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={() => setShowPollDetailsModal(poll)}
+                                                                                className="p-2 text-slate-400 hover:text-brand-primary hover:bg-blue-50 rounded-xl transition-all"
+                                                                                title="عرض تفاصيل المصوتين"
+                                                                            >
+                                                                                👁️
+                                                                            </button>
+                                                                            <button
+                                                                                onClick={() => handleTogglePoll(poll)}
+                                                                                className={`px-4 py-1 rounded-full text-xs font-bold transition-all ${poll.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}
+                                                                            >
+                                                                                {poll.is_active ? 'نشط الآن' : 'غير نشط'}
+                                                                            </button>
+                                                                        </div>
+                                                                        <div className="text-right flex-1 px-4">
+                                                                            <h4 className="font-black text-xl text-slate-800 mb-2">{poll.question}</h4>
+                                                                            <div className="flex justify-end gap-3 text-xs font-bold">
+                                                                                <span className="text-slate-400">تاريخ النشر: {new Date(poll.created_at).toLocaleDateString()}</span>
+                                                                                <span className="text-slate-300">|</span>
+                                                                                <span className="text-slate-400">إجمالي الأصوات: {totalVotes}</span>
+                                                                                <span className="text-slate-300">|</span>
+                                                                                <span className={poll.school_id ? "text-brand-primary" : "text-emerald-500"}>
+                                                                                    🎯 الموجه لـ: {poll.school_id ? (schools.find(s => s.id === poll.school_id)?.name || 'مدرسة غير معروفة') : 'كافة المدارس'}
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+                                                                        {poll.options.map((opt, idx) => {
+                                                                            const votes = results[idx] || 0
+                                                                            const percent = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0
+                                                                            return (
+                                                                                <div key={idx} className="space-y-2">
+                                                                                    <div className="flex justify-between text-xs font-bold">
+                                                                                        <span className="text-brand-primary">{percent}% ({votes} صوت)</span>
+                                                                                        <span className="text-slate-600">{opt}</span>
+                                                                                    </div>
+                                                                                    <div className="h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                                                                                        <div
+                                                                                            className="h-full bg-brand-primary transition-all duration-1000"
+                                                                                            style={{ width: `${percent}%` }}
+                                                                                        />
+                                                                                    </div>
+                                                                                </div>
+                                                                            )
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            )
+                                                        })}
+                                                        {polls.length === 0 && (
+                                                            <div className="p-12 text-center text-slate-400 italic">لا توجد تصويتات مضافة حالياً.</div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                    )}
+
+                                                {activeTab === 'settings' && (
+                                                    <div className="space-y-8 animate-in fade-in slide-in-from-right duration-300">
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                                            {/* Change Password Card */}
+                                                            <div className="glass-card p-8 rounded-3xl shadow-sm border border-slate-200">
+                                                                <div className="flex items-center gap-3 mb-6">
+                                                                    <div className="p-3 bg-brand-primary/10 rounded-2xl text-2xl">🔒</div>
+                                                                    <h3 className="text-xl font-bold text-slate-800">تغيير كلمة المرور</h3>
+                                                                </div>
+                                                                <div className="space-y-4 text-right" dir="rtl">
+                                                                    <div>
+                                                                        <label className="block text-sm font-bold text-slate-500 mb-2">كلمة المرور الجديدة</label>
+                                                                        <input
+                                                                            type="password" value={settingsNewPassword} onChange={e => setSettingsNewPassword(e.target.value)}
+                                                                            className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right"
+                                                                            placeholder="أدخل كلمة المرور الجديدة"
+                                                                        />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label className="block text-sm font-bold text-slate-500 mb-2">تأكيد كلمة المرور</label>
+                                                                        <input
+                                                                            type="password" value={settingsConfirmPassword} onChange={e => setSettingsConfirmPassword(e.target.value)}
+                                                                            className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right"
+                                                                            placeholder="أعد كتابة كلمة المرور"
+                                                                        />
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            if (!settingsNewPassword || settingsNewPassword !== settingsConfirmPassword) {
+                                                                                alert('كلمات المرور غير متطابقة أو فارغة')
+                                                                                return
+                                                                            }
+                                                                            startSecurityChallenge(async () => {
+                                                                                const { error } = await supabase.from('admins').update({ password_hash: settingsNewPassword }).eq('id', user.id)
+                                                                                if (error) alert('خطأ في التحديث: ' + error.message)
+                                                                                else {
+                                                                                    alert('تم تغيير كلمة المرور بنجاح. يرجى استخدامها في المرة القادمة.')
+                                                                                    setSettingsNewPassword('')
+                                                                                    setSettingsConfirmPassword('')
+                                                                                }
+                                                                            })
+                                                                        }}
+                                                                        className="w-full py-4 bg-brand-primary text-white rounded-xl font-bold hover:shadow-lg transition-all"
+                                                                    >
+                                                                        تحديث كلمة المرور
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Global Data Management Card */}
+                                                            <div className="glass-card p-8 rounded-3xl shadow-sm border border-slate-200">
+                                                                <div className="flex items-center gap-3 mb-6">
+                                                                    <div className="p-3 bg-red-100 rounded-2xl text-2xl">⚠️</div>
+                                                                    <h3 className="text-xl font-bold text-slate-800">إدارة البيانات العامة</h3>
+                                                                </div>
+                                                                <div className="space-y-6">
+                                                                    <div className="p-4 bg-red-50 text-red-700 rounded-2xl text-sm leading-relaxed font-bold border border-red-100 text-right">
+                                                                        تحذير: هذه العمليات نهائية ولا يمكن التراجع عنها. سيتم حذف جميع نتائج الطلاب من كافة المسابقات.
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            startSecurityChallenge(async () => {
+                                                                                if (!confirm('هل أنت متأكد من مسح جميع نتائج الطلاب بالكامل من النظام؟')) return
+                                                                                const { error } = await supabase.from('results').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+                                                                                if (error) alert('خطأ في الحذف: ' + error.message)
+                                                                                else {
+                                                                                    alert('تم مسح جميع سجلات النتائج بنجاح')
+                                                                                    fetchAllData()
+                                                                                }
+                                                                            })
+                                                                        }}
+                                                                        className="w-full py-4 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 shadow-md transition-all"
+                                                                    >
+                                                                        🔥 مسح كافة نتائج الطلاب (تصفير اللوحة)
+                                                                    </button>
+
+                                                                    <div className="pt-4 border-t border-red-100 flex flex-col gap-3">
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                startSecurityChallenge(async () => {
+                                                                                    if (!confirm('سيتم حذف جميع حسابات الطلاب المسجلين بالكامل. هل أنت متأكد؟')) return
+                                                                                    const { error } = await supabase.from('students').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+                                                                                    if (error) alert('خطأ: ' + error.message)
+                                                                                    else { alert('تم حذف جميع الطلاب بنجاح'); fetchAllData(); }
+                                                                                })
+                                                                            }}
+                                                                            className="w-full py-3 bg-white text-red-600 border border-red-200 rounded-xl font-bold hover:bg-red-50 transition-all"
+                                                                        >
+                                                                            🗑️ حذف جميع أسماء الطلاب
+                                                                        </button>
+
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                startSecurityChallenge(async () => {
+                                                                                    if (!confirm('سيتم حذف جميع حسابات المعلمين المسجلين. هل أنت متأكد؟')) return
+                                                                                    const { error } = await supabase.from('teachers').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+                                                                                    if (error) alert('خطأ: ' + error.message)
+                                                                                    else { alert('تم حذف جميع المعلمين بنجاح'); fetchAllData(); }
+                                                                                })
+                                                                            }}
+                                                                            className="w-full py-3 bg-white text-red-600 border border-red-200 rounded-xl font-bold hover:bg-red-50 transition-all"
+                                                                        >
+                                                                            👨‍🏫 حذف جميع أسماء المعلمين
+                                                                        </button>
+
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                startSecurityChallenge(async () => {
+                                                                                    if (!confirm('تنبيه: حذف المدارس سيؤدي لحذف كافة البيانات المرتبطة بها (طلاب، معلمين، نتائج). هل أنت متأكد تماماً؟')) return
+                                                                                    const { error } = await supabase.from('schools').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+                                                                                    if (error) alert('خطأ: ' + error.message)
+                                                                                    else { alert('تم حذف جميع المدارس بنجاح'); fetchAllData(); }
+                                                                                })
+                                                                            }}
+                                                                            className="w-full py-3 bg-white text-red-600 border border-red-200 rounded-xl font-bold hover:bg-red-50 transition-all"
+                                                                        >
+                                                                            🏫 حذف جميع المدارس وبياناتها
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* WhatsApp Template Management Card */}
+                                                            <div className="glass-card p-8 rounded-3xl shadow-sm border border-slate-200">
+                                                                <div className="flex items-center gap-3 mb-6">
+                                                                    <div className="p-3 bg-brand-primary/10 rounded-2xl text-2xl">📱</div>
+                                                                    <h3 className="text-xl font-bold text-slate-800">تخصيص رسالة الواتساب</h3>
+                                                                </div>
+                                                                <div className="space-y-4 text-right" dir="rtl">
+                                                                    <div className="p-4 bg-blue-50 text-blue-700 rounded-2xl text-[11px] font-bold leading-relaxed border border-blue-100">
+                                                                        استخدم الرموز التالية ليتم استبدالها تلقائياً:<br />
+                                                                        اسم الطالب/المعلم : <span className="text-brand-primary">{"{name}"}</span><br />
+                                                                        كود الدخول : <span className="text-brand-primary">{"{code}"}</span><br />
+                                                                        (طالب أو معلم) : <span className="text-brand-primary">{"{role}"}</span><br />
+                                                                        رابط الموقع : <span className="text-brand-primary">{"{link}"}</span><br />
+                                                                        كود المدرسة : <span className="text-brand-primary">{"{school_code}"}</span><br />
+                                                                        رابط صفحة المدرسة : <span className="text-brand-primary">{"{school_page}"}</span>
+                                                                    </div>
+                                                                    <textarea
+                                                                        value={whatsappTemplate}
+                                                                        onChange={e => setWhatsappTemplate(e.target.value)}
+                                                                        rows="6"
+                                                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-sm font-bold text-right leading-relaxed"
+                                                                        placeholder="اكتب نص الرسالة هنا..."
+                                                                        dir="rtl"
+                                                                    />
+
+                                                                    {/* Real-time Preview */}
+                                                                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-right">
+                                                                        <div className="text-[10px] text-slate-400 mb-2 font-bold">👁️ معاينة شكل الرسالة:</div>
+                                                                        <div className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed" dir="rtl">
+                                                                            {(whatsappTemplate || `مرحباً {name}\nيسعدنا انضمامك لمنصة المتكامل.\n\nبيانات الدخول الخاصة بك كـ ({role}):\nكود الدخول: *{code}*\n\nنتمنى لك تجربة ممتعة! 🌹`)
+                                                                                .replace(/\\n/g, '\n')
+                                                                                .replace(/{name}/g, 'أحمد محمد')
+                                                                                .replace(/{code}/g, '12345678')
+                                                                                .replace(/{role}/g, 'طالب')
+                                                                                .replace(/{link}/g, window.location.origin)
+                                                                                .replace(/{school_code}/g, 'SCH001')
+                                                                                .replace(/{school_page}/g, 'fb.com/school')}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <button
+                                                                        onClick={async () => {
+                                                                            const { error } = await supabase.from('config').upsert({ key: 'whatsapp_template', value: whatsappTemplate })
+                                                                            if (error) alert('خطأ في الحفظ: ' + error.message)
+                                                                            else alert('تم حفظ قالب الرسالة بنجاح')
+                                                                        }}
+                                                                        className="w-full py-4 bg-brand-primary text-white rounded-xl font-bold hover:shadow-lg transition-all"
+                                                                    >
+                                                                        💾 حفظ قالب الرسالة
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    </div>
+                                        )}
+
+                                        {/* Import Students Modal */}
+                                        {
+                                            showImportModal && (
+                                                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-8 animate-in zoom-in duration-200">
+                                                        <h3 className="text-xl font-bold mb-4 text-right">استيراد بيانات الطلاب (CSV)</h3>
+                                                        <p className="text-sm text-slate-500 mb-6 text-right leading-relaxed">
+                                                            قم برفع ملف CSV يحتوي على بيانات الطلاب بالصيغة التالية:<br />
+                                                            <code className="bg-slate-100 px-2 py-1 rounded text-xs font-mono">name,code,grade_id,class_name,whatsapp_number</code>
+                                                        </p>
+
+                                                        <div className="space-y-4 mb-8">
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2 text-right">المدرسة المستهدفة</label>
+                                                                <select
+                                                                    className="w-full p-3 rounded-xl border border-slate-200"
+                                                                    value={importConfig.school_id}
+                                                                    onChange={e => setImportConfig({ ...importConfig, school_id: e.target.value })}
+                                                                >
+                                                                    <option value="">-- اختر المدرسة --</option>
+                                                                    {schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                                                </select>
+                                                            </div>
+
+                                                            <div className="relative border-2 border-dashed border-slate-200 rounded-2xl p-8 hover:bg-slate-50 transition-all cursor-pointer group">
+                                                                <input
+                                                                    type="file"
+                                                                    accept=".csv"
+                                                                    onChange={(e) => {
+                                                                        if (!importConfig.school_id) {
+                                                                            alert('يرجى اختيار المدرسة أولاً')
+                                                                            e.target.value = null
+                                                                            return
+                                                                        }
+                                                                        const file = e.target.files[0]
+                                                                        if (file) {
+                                                                            const reader = new FileReader()
+                                                                            reader.onload = (event) => handleImportStudents(event.target.result)
+                                                                            reader.readAsText(file)
+                                                                        }
+                                                                    }}
+                                                                    className="absolute inset-0 opacity-0 cursor-pointer"
+                                                                />
+                                                                <div className="text-center">
+                                                                    <div className="text-3xl mb-2 group-hover:scale-110 transition-transform">📂</div>
+                                                                    <div className="text-sm font-bold text-slate-600">اضغط لرفع ملف CSV</div>
+                                                                    <div className="text-xs text-slate-400 mt-1">سيتم إضافة الطلاب تلقائياً</div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex justify-end gap-3">
+                                                            <button
+                                                                onClick={() => setShowImportModal(false)}
+                                                                className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
+                                                            >
+                                                                إلغاء
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+
+                                        {/* Question Preview Modal */}
+                                        {
+                                            previewQuestion && (
+                                                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 overflow-y-auto">
+                                                    <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-4xl my-8 animate-in zoom-in duration-300 relative">
+                                                        <button
+                                                            onClick={() => setPreviewQuestion(null)}
+                                                            className="absolute top-6 right-6 z-10 text-slate-400 hover:text-slate-600 transition-all text-xl bg-white rounded-full p-2 shadow-md"
+                                                        >
+                                                            ✕
+                                                        </button>
+
+                                                        {/* Modal Header */}
+                                                        <div className="p-6 bg-gradient-to-br from-brand-primary to-purple-600 text-white rounded-t-[2.5rem]">
+                                                            <div className="flex items-center gap-3 mb-2">
+                                                                <div className="text-2xl">📝</div>
+                                                                <h3 className="text-2xl font-black">معاينة وتعديل السؤال</h3>
+                                                            </div>
+                                                            <p className="text-white/80 text-sm font-bold">يمكنك تعديل السؤال مباشرة من هنا</p>
+                                                        </div>
+
+                                                        {/* Modal Body - Question Content */}
+                                                        <div className="p-6 max-h-[60vh] overflow-y-auto">
+                                                            <div className="space-y-6">
+                                                                {/* Question Text */}
+                                                                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-3 text-right">نص السؤال</label>
+                                                                    <textarea
+                                                                        className="w-full p-4 rounded-xl bg-white border border-slate-200 font-bold text-slate-700 text-right focus:ring-2 focus:ring-blue-100 min-h-[100px]"
+                                                                        value={previewQuestion.question || ''}
+                                                                        onChange={(e) => handleUpdateQuestionField(previewQuestion, 'question', e.target.value)}
+                                                                        dir="rtl"
+                                                                    />
+                                                                </div>
+
+                                                                {/* Choices Grid */}
+                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                                    {['choice_a', 'choice_b', 'choice_c', 'choice_d'].map((choiceKey, idx) => {
+                                                                        const isCorrect = previewQuestion.correct_answer === choiceKey.split('_')[1].toUpperCase()
+                                                                        return (
+                                                                            <div key={choiceKey} className={`p-4 rounded-2xl border-2 transition-all ${isCorrect ? 'bg-green-50 border-green-300' : 'bg-white border-slate-200'}`}>
+                                                                                <div className="flex items-center gap-2 mb-2">
+                                                                                    <input
+                                                                                        type="radio"
+                                                                                        name="correct_answer_preview"
+                                                                                        checked={isCorrect}
+                                                                                        onChange={() => handleUpdateQuestionField(previewQuestion, 'correct_answer', choiceKey.split('_')[1].toUpperCase())}
+                                                                                        className="accent-green-600"
+                                                                                    />
+                                                                                    <label className="text-xs font-bold text-slate-400">الاختيار {['أ', 'ب', 'ج', 'د'][idx]} {isCorrect && '(الإجابة الصحيحة)'}</label>
+                                                                                </div>
+                                                                                <textarea
+                                                                                    className="w-full p-3 rounded-xl bg-slate-50 border-none font-bold text-slate-700 text-right text-sm focus:ring-2 focus:ring-blue-100"
+                                                                                    value={previewQuestion[choiceKey] || ''}
+                                                                                    onChange={(e) => handleUpdateQuestionField(previewQuestion, choiceKey, e.target.value)}
+                                                                                    rows="2"
+                                                                                    dir="rtl"
+                                                                                />
+                                                                            </div>
+                                                                        )
+                                                                    })}
+                                                                </div>
+
+                                                                {/* Difficulty & Score Controls */}
+                                                                <div className="grid grid-cols-2 gap-6 mb-4 px-4">
+                                                                    <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                                                                        <label className="block text-sm font-bold text-slate-500 mb-2 text-right">مستوى السؤال (Level)</label>
+                                                                        <select
+                                                                            className="w-full p-2 rounded-xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-blue-100"
+                                                                            value={previewQuestion.difficulty || 'medium'}
+                                                                            onChange={(e) => handleUpdateQuestionField(previewQuestion, 'difficulty', e.target.value)}
+                                                                        >
+                                                                            <option value="easy">سهل (Easy)</option>
+                                                                            <option value="medium">متوسط (Medium)</option>
+                                                                            <option value="hard">صعب (Hard)</option>
+                                                                            <option value="talented">متفوقين (Talented)</option>
+                                                                        </select>
+                                                                    </div>
+                                                                    <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                                                                        <label className="block text-sm font-bold text-slate-500 mb-2 text-right">درجة السؤال (Score)</label>
+                                                                        <input
+                                                                            type="number"
+                                                                            className="w-full p-2 rounded-xl bg-slate-50 border-none font-bold text-slate-700 text-center focus:ring-2 focus:ring-blue-100"
+                                                                            value={previewQuestion.score || 1}
+                                                                            onChange={(e) => handleUpdateQuestionField(previewQuestion, 'score', parseFloat(e.target.value))}
+                                                                            min="0.5"
+                                                                            step="0.5"
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Modal Footer - Audit Controls */}
+                                                            <div className="p-6 bg-white border-t border-slate-100">
+                                                                <div className="flex items-center justify-between bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                                                                    <div className="flex items-center gap-4">
+                                                                        <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-2xl">
+                                                                            👨‍🏫
+                                                                        </div>
+                                                                        <div>
+                                                                            <div className="font-bold text-slate-800">تدقيق المعلم المختص</div>
+                                                                            <div className="text-sm text-slate-500">هل تمت مراجعة هذا السؤال والتأكد من صحته؟</div>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <div className={`px-4 py-2 rounded-xl font-bold flex items-center gap-3 transition-all ${previewQuestion.is_audited ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                                        <span className="text-sm">
+                                                                            {previewQuestion.is_audited ? 'تم التدقيق واعتماد السؤال' : 'السؤال غير مدقق حتى الآن'}
+                                                                        </span>
+                                                                        <label className="relative inline-flex items-center cursor-pointer">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                className="sr-only peer"
+                                                                                checked={previewQuestion.is_audited || false}
+                                                                                onChange={(e) => handleAuditQuestion(previewQuestion, e.target.checked)}
+                                                                            />
+                                                                            <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                                                                        </label>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+
+
+                                        {/* Import Questions Modal */}
+                                        {
+                                            showImportQuestionsModal && (
+                                                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-8 animate-in zoom-in duration-200 overflow-y-auto max-h-[90vh]">
+                                                        <h3 className="text-xl font-bold mb-4 text-right">استيراد أسئلة (JS/JSON)</h3>
+                                                        <p className="text-sm text-slate-500 mb-6 text-right leading-relaxed">
+                                                            قم برفع ملف يحتوي على مصفوفة الأسئلة. النظام سيدعم صيغة JS Object أو JSON.<br />
+                                                            سيتم تجاهل دالة convertMathToLatex واستخراج النص بداخلها.
+                                                        </p>
+
+                                                        <div className="space-y-4 mb-8">
+                                                            <div className="grid grid-cols-2 gap-4">
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">المادة (تخصص عام)</label>
+                                                                    <select
+                                                                        className="w-full p-3 rounded-xl border border-slate-200"
+                                                                        value={importConfig.master_subject_id}
+                                                                        onChange={e => setImportConfig({ ...importConfig, master_subject_id: e.target.value })}
+                                                                    >
+                                                                        <option value="">-- اختر المادة --</option>
+                                                                        {masterSubjects.map(ms => <option key={ms.id} value={ms.id}>{ms.name}</option>)}
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">الصف الدراسي</label>
+                                                                    <select
+                                                                        className="w-full p-3 rounded-xl border border-slate-200"
+                                                                        value={importConfig.grade_id}
+                                                                        onChange={e => setImportConfig({ ...importConfig, grade_id: e.target.value })}
+                                                                    >
+                                                                        <option value="">-- اختر الصف --</option>
+                                                                        {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">الترم</label>
+                                                                    <select
+                                                                        className="w-full p-3 rounded-xl border border-slate-200"
+                                                                        value={importConfig.term}
+                                                                        onChange={e => setImportConfig({ ...importConfig, term: e.target.value })}
+                                                                    >
+                                                                        <option value="1">الترم الأول</option>
+                                                                        <option value="2">الترم الثاني</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">الأسبوع</label>
+                                                                    <select
+                                                                        className="w-full p-3 rounded-xl border border-slate-200"
+                                                                        value={importConfig.week}
+                                                                        onChange={e => setImportConfig({ ...importConfig, week: e.target.value })}
+                                                                    >
+                                                                        {Array.from({ length: 20 }, (_, i) => i + 1).map(week => (
+                                                                            <option key={week} value={week}>الأسبوع {week}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="relative border-2 border-dashed border-slate-200 rounded-2xl p-8 hover:bg-slate-50 transition-all cursor-pointer group">
+                                                                <input
+                                                                    type="file"
+                                                                    accept=".js,.json,.txt"
+                                                                    onChange={(e) => {
+                                                                        if (!importConfig.grade_id || !importConfig.master_subject_id) {
+                                                                            alert('يرجى اختيار المادة والصف أولاً')
+                                                                            e.target.value = null
+                                                                            return
+                                                                        }
+                                                                        const file = e.target.files[0]
+                                                                        if (file) {
+                                                                            const reader = new FileReader()
+                                                                            reader.onload = (event) => handleImportQuestions(event.target.result)
+                                                                            reader.readAsText(file)
+                                                                        }
+                                                                    }}
+                                                                    className="absolute inset-0 opacity-0 cursor-pointer"
+                                                                />
+                                                                <div className="text-center">
+                                                                    <div className="text-3xl mb-2 group-hover:scale-110 transition-transform">📂</div>
+                                                                    <div className="text-sm font-bold text-slate-600">اضغط لرفع ملف الأسئلة</div>
+                                                                    <div className="text-xs text-slate-400 mt-1">JS / JSON</div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex justify-end gap-3">
+                                                            <button
+                                                                onClick={() => setShowImportQuestionsModal(false)}
+                                                                className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
+                                                            >
+                                                                إلغاء
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+
+                                        {/* CSV Import Modal */}
+                                        {
+                                            showImportModal && (
+                                                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
+                                                        <h3 className="text-xl font-bold mb-4 text-right">استيراد طلاب من ملف CSV</h3>
+                                                        <p className="text-sm text-slate-500 mb-6 text-right leading-relaxed">
+                                                            تأكد أن الملف يحتوي على أعمدة (name, code, grade, class).<br />
+                                                            في حال عدم وجود كود، سيقوم النظام بتوليد كود تلقائي.
+                                                        </p>
+
+                                                        <div className="space-y-4 mb-8">
+                                                            <label className="block text-sm font-bold text-slate-500 text-right">اختر المدرسة المراد الإضافة إليها:</label>
+                                                            <select
+                                                                id="import-school-select"
+                                                                className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right font-bold"
+                                                            >
+                                                                <option value="">-- اختر مدرسة --</option>
+                                                                {schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                                            </select>
+
+                                                            <div className="relative border-2 border-dashed border-slate-200 rounded-2xl p-8 hover:bg-slate-50 transition-all cursor-pointer group">
+                                                                <input
+                                                                    type="file"
+                                                                    accept=".csv"
+                                                                    onChange={(e) => {
+                                                                        const schoolId = document.getElementById('import-school-select').value
+                                                                        if (!schoolId) {
+                                                                            alert('يرجى اختيار المدرسة أولاً')
+                                                                            e.target.value = null
+                                                                            return
+                                                                        }
+                                                                        const file = e.target.files[0]
+                                                                        if (file) {
+                                                                            const reader = new FileReader()
+                                                                            reader.onload = (event) => handleCSVImport(schoolId, event.target.result)
+                                                                            reader.readAsText(file)
+                                                                        }
+                                                                    }}
+                                                                    className="absolute inset-0 opacity-0 cursor-pointer"
+                                                                />
+                                                                <div className="text-center">
+                                                                    <div className="text-3xl mb-2 group-hover:scale-110 transition-transform">📂</div>
+                                                                    <div className="text-sm font-bold text-slate-600">اضغط لرفع ملف طلاب CSV</div>
+                                                                    <div className="text-xs text-slate-400 mt-1">UTF-8 encoded .csv</div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex justify-end gap-3">
+                                                            <button
+                                                                onClick={() => setShowImportModal(false)}
+                                                                className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
+                                                            >
+                                                                إلغاء
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+
+                                        {/* Edit Phase Modal */}
+                                        {
+                                            editingPhase && (
+                                                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
+                                                        <h3 className="text-xl font-bold mb-4 text-right">تعديل المرحلة الدراسية</h3>
+                                                        <form onSubmit={handleUpdatePhase} className="space-y-4">
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2 text-right">اسم المرحلة</label>
+                                                                <input
+                                                                    type="text"
+                                                                    required
+                                                                    value={editingPhase.name}
+                                                                    onChange={e => setEditingPhase({ ...editingPhase, name: e.target.value })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right"
+                                                                />
+                                                            </div>
+                                                            <div className="flex justify-end gap-3 mt-8">
+                                                                <button type="button" onClick={() => setEditingPhase(null)} className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200">إلغاء</button>
+                                                                <button type="submit" className="px-6 py-3 bg-brand-primary text-white rounded-xl font-bold hover:scale-[1.02] transition-all">حفظ التعديلات</button>
+                                                            </div>
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+
+                                        {/* Edit Grade Modal */}
+                                        {
+                                            editingGrade && (
+                                                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
+                                                        <h3 className="text-xl font-bold mb-4 text-right">تعديل الصف الدراسي</h3>
+                                                        <form onSubmit={handleUpdateGrade} className="space-y-4">
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2 text-right">المرحلة الدراسية</label>
+                                                                <select
+                                                                    required
+                                                                    value={editingGrade.phase_id}
+                                                                    onChange={e => setEditingGrade({ ...editingGrade, phase_id: e.target.value })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 bg-white text-right font-bold"
+                                                                >
+                                                                    {phases.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                                                </select>
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2 text-right">اسم الصف</label>
+                                                                <input
+                                                                    type="text"
+                                                                    required
+                                                                    value={editingGrade.name}
+                                                                    onChange={e => setEditingGrade({ ...editingGrade, name: e.target.value })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary text-right"
+                                                                />
+                                                            </div>
+                                                            <div className="flex justify-end gap-3 mt-8">
+                                                                <button type="button" onClick={() => setEditingGrade(null)} className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200">إلغاء</button>
+                                                                <button type="submit" className="px-6 py-3 bg-brand-primary text-white rounded-xl font-bold hover:scale-[1.02] transition-all">حفظ التعديلات</button>
+                                                            </div>
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+
+                                        {/* Edit Subject Modal */}
+                                        {
+                                            editingSubject && (
+                                                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
+                                                        <h3 className="text-xl font-bold mb-4 text-right">تعديل المادة الدراسية</h3>
+                                                        <form onSubmit={handleUpdateSubject} className="space-y-4">
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2 text-right">الصف الدراسي</label>
+                                                                <select
+                                                                    required
+                                                                    value={editingSubject.grade_id}
+                                                                    onChange={e => setEditingSubject({ ...editingSubject, grade_id: e.target.value })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 bg-white text-right font-bold"
+                                                                >
+                                                                    {grades.map(g => <option key={g.id} value={g.id}>{g.educational_phases?.name} - {g.name}</option>)}
+                                                                </select>
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2 text-right">المادة الدراسية</label>
+                                                                <select
+                                                                    required
+                                                                    value={editingSubject.master_subject_id}
+                                                                    onChange={e => setEditingSubject({ ...editingSubject, master_subject_id: e.target.value })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 bg-white text-right font-bold"
+                                                                >
+                                                                    <option value="">اختر المادة العامة</option>
+                                                                    {masterSubjects.map(ms => <option key={ms.id} value={ms.id}>{ms.name}</option>)}
+                                                                </select>
+                                                            </div>
+                                                            <div className="flex justify-end gap-3 mt-8">
+                                                                <button type="button" onClick={() => setEditingSubject(null)} className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200">إلغاء</button>
+                                                                <button type="submit" className="px-6 py-3 bg-brand-primary text-white rounded-xl font-bold hover:scale-[1.02] transition-all">حفظ التعديلات</button>
+                                                            </div>
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+                                        {/* Edit Teacher Modal */}
+                                        {
+                                            editingTeacher && (
+                                                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
+                                                        <h3 className="text-xl font-bold mb-4 text-right">تعديل بيانات المعلم</h3>
+                                                        <form onSubmit={handleUpdateTeacher} className="space-y-4 text-right">
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2">اسم المعلم</label>
+                                                                <input
+                                                                    type="text" required
+                                                                    value={editingTeacher.name}
+                                                                    onChange={e => setEditingTeacher({ ...editingTeacher, name: e.target.value })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary"
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2">المدرسة</label>
+                                                                <select
+                                                                    required
+                                                                    value={editingTeacher.school_id}
+                                                                    onChange={e => setEditingTeacher({ ...editingTeacher, school_id: e.target.value })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 bg-white"
+                                                                >
+                                                                    {schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                                                </select>
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2">التخصص (المادة العامة)</label>
+                                                                <select
+                                                                    required
+                                                                    value={editingTeacher.master_subject_id}
+                                                                    onChange={e => setEditingTeacher({ ...editingTeacher, master_subject_id: e.target.value })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 bg-white"
+                                                                >
+                                                                    <option value="">اختر التخصص</option>
+                                                                    {masterSubjects.map(ms => <option key={ms.id} value={ms.id}>{ms.name}</option>)}
+                                                                </select>
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2">كود الدخول</label>
+                                                                <input
+                                                                    type="text" required
+                                                                    value={editingTeacher.teacher_code}
+                                                                    onChange={e => setEditingTeacher({ ...editingTeacher, teacher_code: e.target.value })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary"
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2">رقم الواتساب (اختياري)</label>
+                                                                <input
+                                                                    type="text"
+                                                                    value={editingTeacher.whatsapp_number || ''}
+                                                                    onChange={e => setEditingTeacher({ ...editingTeacher, whatsapp_number: e.target.value })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary"
+                                                                    placeholder="01xxxxxxxxx"
+                                                                />
+                                                            </div>
+                                                            <div className="flex justify-end gap-3 mt-8">
+                                                                <button type="button" onClick={() => setEditingTeacher(null)} className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200">إلغاء</button>
+                                                                <button type="submit" className="px-6 py-3 bg-brand-primary text-white rounded-xl font-bold hover:scale-[1.02] transition-all">حفظ التعديلات</button>
+                                                            </div>
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+
+                                        {/* Edit Student Modal */}
+                                        {
+                                            editingStudent && (
+                                                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
+                                                        <h3 className="text-xl font-bold mb-4 text-right">تعديل بيانات الطالب</h3>
+                                                        <form onSubmit={handleUpdateStudent} className="space-y-4 text-right">
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2">اسم الطالب</label>
+                                                                <input
+                                                                    type="text" required
+                                                                    value={editingStudent.name}
+                                                                    onChange={e => setEditingStudent({ ...editingStudent, name: e.target.value })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary"
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2">المدرسة</label>
+                                                                <select
+                                                                    required
+                                                                    value={editingStudent.school_id}
+                                                                    onChange={e => setEditingStudent({ ...editingStudent, school_id: e.target.value })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 bg-white"
+                                                                >
+                                                                    {schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                                                </select>
+                                                            </div>
+                                                            <div className="grid grid-cols-2 gap-4">
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2">الصف الدراسي</label>
+                                                                    <select
+                                                                        required
+                                                                        value={editingStudent.grade_id}
+                                                                        onChange={e => setEditingStudent({ ...editingStudent, grade_id: e.target.value })}
+                                                                        className="w-full p-4 rounded-xl border border-slate-200 bg-white"
+                                                                    >
+                                                                        {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2">اسم الفصل</label>
+                                                                    <input
+                                                                        type="text" required
+                                                                        value={editingStudent.class_name}
+                                                                        onChange={e => setEditingStudent({ ...editingStudent, class_name: e.target.value })}
+                                                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary"
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2">كود الدخول</label>
+                                                                <input
+                                                                    type="text" required
+                                                                    value={editingStudent.student_code}
+                                                                    onChange={e => setEditingStudent({ ...editingStudent, student_code: e.target.value })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary"
+                                                                />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2">رقم الواتساب (اختياري)</label>
+                                                                <input
+                                                                    type="text"
+                                                                    value={editingStudent.whatsapp_number || ''}
+                                                                    onChange={e => setEditingStudent({ ...editingStudent, whatsapp_number: e.target.value })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary"
+                                                                    placeholder="01xxxxxxxxx"
+                                                                />
+                                                            </div>
+                                                            <div className="flex justify-end gap-3 mt-8">
+                                                                <button type="button" onClick={() => setEditingStudent(null)} className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200">إلغاء</button>
+                                                                <button type="submit" className="px-6 py-3 bg-brand-primary text-white rounded-xl font-bold hover:scale-[1.02] transition-all">حفظ التعديلات</button>
+                                                            </div>
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+
+                                        {/* Global Edit Question Modal */}
+                                        {
+                                            editingQuestion && (
+                                                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-8 animate-in zoom-in duration-200 overflow-y-auto max-h-[90vh]">
+                                                        <h3 className="text-xl font-bold mb-6 text-right">تعديل بيانات السؤال (إدارة عليا)</h3>
+                                                        <form onSubmit={handleUpdateQuestion} className="space-y-6 text-right">
+                                                            <div>
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2">نص السؤال</label>
+                                                                <textarea
+                                                                    value={editingQuestion.content?.question || ''}
+                                                                    onChange={e => setEditingQuestion({
+                                                                        ...editingQuestion,
+                                                                        content: { ...editingQuestion.content, question: e.target.value }
+                                                                    })}
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary h-24"
+                                                                />
+                                                            </div>
+
+                                                            <div className="grid grid-cols-2 gap-4">
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2">المادة</label>
+                                                                    <select
+                                                                        value={editingQuestion.subject_id || ''}
+                                                                        onChange={e => setEditingQuestion({ ...editingQuestion, subject_id: e.target.value })}
+                                                                        className="w-full p-4 rounded-xl border border-slate-200 bg-white"
+                                                                    >
+                                                                        <option value="">-- اختر المادة --</option>
+                                                                        {subjects.map(s => (
+                                                                            <option key={s.id} value={s.id}>{s.master_subjects?.name}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2">الصف</label>
+                                                                    <select
+                                                                        value={editingQuestion.grade_id || ''}
+                                                                        onChange={e => setEditingQuestion({ ...editingQuestion, grade_id: e.target.value })}
+                                                                        className="w-full p-4 rounded-xl border border-slate-200 bg-white"
+                                                                    >
+                                                                        <option value="">-- اختر الصف --</option>
+                                                                        {grades.map(g => (
+                                                                            <option key={g.id} value={g.id}>{g.name}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="grid grid-cols-2 gap-4">
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2">مستوى الصعوبة</label>
+                                                                    <select
+                                                                        value={editingQuestion.difficulty}
+                                                                        onChange={e => {
+                                                                            const newDiff = e.target.value
+                                                                            let newScore = 1
+                                                                            if (newDiff === 'easy') newScore = 1
+                                                                            if (newDiff === 'medium') newScore = 2
+                                                                            if (newDiff === 'hard') newScore = 3
+                                                                            if (newDiff === 'talented') newScore = 4;
+
+                                                                            setEditingQuestion({
+                                                                                ...editingQuestion,
+                                                                                difficulty: newDiff,
+                                                                                content: { ...editingQuestion.content, score: newScore }
+                                                                            })
+                                                                        }}
+                                                                        className="w-full p-4 rounded-xl border border-slate-200 bg-white"
+                                                                    >
+                                                                        <option value="easy">سهل</option>
+                                                                        <option value="medium">متوسط</option>
+                                                                        <option value="hard">صعب</option>
+                                                                        <option value="talented">متفوقين</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2">الترم</label>
+                                                                    <select
+                                                                        value={editingQuestion.term}
+                                                                        onChange={e => setEditingQuestion({ ...editingQuestion, term: parseInt(e.target.value) })}
+                                                                        className="w-full p-4 rounded-xl border border-slate-200 bg-white"
+                                                                    >
+                                                                        <option value="1">الترم الأول</option>
+                                                                        <option value="2">الترم الثاني</option>
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="flex justify-end gap-3 mt-8">
+                                                                <button type="button" onClick={() => setEditingQuestion(null)} className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200">إلغاء</button>
+                                                                <button type="submit" className="px-6 py-3 bg-brand-primary text-white rounded-xl font-bold hover:scale-[1.02] transition-all">حفظ التغييرات</button>
+                                                            </div>
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+
+                                        {/* Questions Tab Preview Modal */}
+                                        {
+                                            previewQuestion && (
+                                                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                                    <div className="bg-white rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col">
+                                                        {/* Modal Header */}
+                                                        <div className="p-6 border-b border-slate-100 flex justify-between items-center sticky top-0 bg-white z-10">
+                                                            <div>
+                                                                <h3 className="text-2xl font-black text-slate-800">معاينة السؤال (طالب)</h3>
+                                                                <p className="text-sm text-slate-500 mt-1">هكذا سيظهر السؤال للطالب في المسابقة</p>
+                                                            </div>
+                                                            <button onClick={() => setPreviewQuestion(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                                                                ❌
+                                                            </button>
+                                                        </div>
+
+                                                        {/* Modal Body - Student View Simulation */}
+                                                        <div className="p-8 bg-slate-50 flex-1">
+                                                            {/* Question Content */}
+                                                            <div className="bg-white rounded-3xl p-8 shadow-sm border border-slate-200 mb-8 text-center">
+                                                                {/* Image if exists */}
+                                                                {previewQuestion.content?.image && (
+                                                                    <div className="mb-6 rounded-2xl overflow-hidden border border-slate-200 max-w-md mx-auto">
+                                                                        <img src={previewQuestion.content.image} alt="Question" className="w-full h-auto" />
+                                                                    </div>
+                                                                )}
+
+                                                                {/* Question Text */}
+                                                                <h2 className="text-2xl md:text-3xl font-black text-slate-800 leading-relaxed mb-4" dir="auto">
+                                                                    {convertMathToLatex(previewQuestion.content?.question || previewQuestion.content?.text)}
+                                                                </h2>
+                                                            </div>
+
+                                                            {/* Options Grid */}
+                                                            <div className="mb-2 px-4">
+                                                                <p className="text-sm text-slate-500 italic">💡 انقر على أي اختيار لتحديده كإجابة صحيحة</p>
+                                                            </div>
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                                                                {previewQuestion.content?.options?.map((option, idx) => {
+                                                                    const isCorrect = option === previewQuestion.correct_answer ||
+                                                                        option === previewQuestion.content?.correct ||
+                                                                        idx === previewQuestion.content?.correct ||
+                                                                        idx === parseInt(previewQuestion.correct_answer) ||
+                                                                        idx === parseInt(previewQuestion.content?.correct);
+                                                                    return (
+                                                                        <div
+                                                                            key={idx}
+                                                                            onClick={() => handleUpdateQuestionField(previewQuestion, 'correct_answer', idx)}
+                                                                            className={`p-4 rounded-xl border-2 flex items-center gap-3 transition-all cursor-pointer hover:scale-[1.02] ${isCorrect
+                                                                                ? 'border-green-500 bg-green-50 ring-4 ring-green-100'
+                                                                                : 'border-slate-200 bg-white opacity-70 hover:border-blue-300 hover:bg-blue-50'
+                                                                                }`}
+                                                                        >
+                                                                            <span className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm ${isCorrect ? 'bg-green-500 text-white' : 'bg-slate-100 text-slate-400'
+                                                                                }`}>
+                                                                                {idx + 1}
+                                                                            </span>
+                                                                            <span className={`font-bold text-lg ${isCorrect ? 'text-green-700' : 'text-slate-600'}`} dir="auto">
+                                                                                {convertMathToLatex(option)}
+                                                                            </span>
+                                                                            {isCorrect && <span className="mr-auto text-green-600 text-xl">✓ الإجابة الصحيحة</span>}
+                                                                        </div>
+                                                                    )
+                                                                })}
+                                                            </div>
+
+                                                            {/* Editable Question Details: Level & Score */}
+                                                            <div className="grid grid-cols-2 gap-6 mb-4 px-4">
+                                                                <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">مستوى السؤال (Level)</label>
+                                                                    <select
+                                                                        className="w-full p-2 rounded-xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-blue-100"
+                                                                        value={previewQuestion.difficulty || 'medium'}
+                                                                        onChange={(e) => handleUpdateQuestionField(previewQuestion, 'difficulty', e.target.value)}
+                                                                    >
+                                                                        <option value="easy">سهل (Easy)</option>
+                                                                        <option value="medium">متوسط (Medium)</option>
+                                                                        <option value="hard">صعب (Hard)</option>
+                                                                        <option value="talented">متفوقين (Talented)</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">درجة السؤال (Score)</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        className="w-full p-2 rounded-xl bg-slate-50 border-none font-bold text-slate-700 text-center focus:ring-2 focus:ring-blue-100"
+                                                                        value={previewQuestion.score || 1}
+                                                                        onChange={(e) => handleUpdateQuestionField(previewQuestion, 'score', parseFloat(e.target.value))}
+                                                                        min="0.5"
+                                                                        step="0.5"
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Modal Footer - Audit Controls */}
+                                                        <div className="p-6 bg-white border-t border-slate-100">
+                                                            <div className="flex items-center justify-between bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                                                                <div className="flex items-center gap-4">
+                                                                    <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-2xl">
+                                                                        👨‍🏫
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="font-bold text-slate-800">تدقيق المعلم المختص</div>
+                                                                        <div className="text-sm text-slate-500">هل تمت مراجعة هذا السؤال والتأكد من صحته؟</div>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className={`px-4 py-2 rounded-xl font-bold flex items-center gap-3 transition-all ${previewQuestion.is_audited ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                                    <span className="text-sm">
+                                                                        {previewQuestion.is_audited ? 'تم التدقيق واعتماد السؤال' : 'السؤال غير مدقق حتى الآن'}
+                                                                    </span>
+                                                                    <label className="relative inline-flex items-center cursor-pointer">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            className="sr-only peer"
+                                                                            checked={previewQuestion.is_audited || false}
+                                                                            onChange={(e) => handleAuditQuestion(previewQuestion, e.target.checked)}
+                                                                        />
+                                                                        <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                                                                    </label>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+
+                                        {/* Import Questions Modal */}
+                                        {
+                                            showImportQuestionsModal && (
+                                                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-8 animate-in zoom-in duration-200 overflow-y-auto max-h-[90vh]">
+                                                        <h3 className="text-xl font-bold mb-4 text-right">استيراد أسئلة (JS/JSON)</h3>
+                                                        <p className="text-sm text-slate-500 mb-6 text-right leading-relaxed">
+                                                            قم برفع ملف يحتوي على مصفوفة الأسئلة. النظام سيدعم صيغة JS Object أو JSON.<br />
+                                                            سيتم تجاهل دالة convertMathToLatex واستخراج النص بداخلها.
+                                                        </p>
+
+                                                        <div className="space-y-4 mb-8">
+                                                            <div className="grid grid-cols-2 gap-4">
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">المادة (تخصص عام)</label>
+                                                                    <select
+                                                                        className="w-full p-3 rounded-xl border border-slate-200"
+                                                                        value={importConfig.master_subject_id}
+                                                                        onChange={e => setImportConfig({ ...importConfig, master_subject_id: e.target.value })}
+                                                                    >
+                                                                        <option value="">-- اختر المادة --</option>
+                                                                        {masterSubjects.map(ms => <option key={ms.id} value={ms.id}>{ms.name}</option>)}
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">الصف الدراسي</label>
+                                                                    <select
+                                                                        className="w-full p-3 rounded-xl border border-slate-200"
+                                                                        value={importConfig.grade_id}
+                                                                        onChange={e => setImportConfig({ ...importConfig, grade_id: e.target.value })}
+                                                                    >
+                                                                        <option value="">-- اختر الصف --</option>
+                                                                        {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">الترم</label>
+                                                                    <select
+                                                                        className="w-full p-3 rounded-xl border border-slate-200"
+                                                                        value={importConfig.term}
+                                                                        onChange={e => setImportConfig({ ...importConfig, term: e.target.value })}
+                                                                    >
+                                                                        <option value="1">الترم الأول</option>
+                                                                        <option value="2">الترم الثاني</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label className="block text-sm font-bold text-slate-500 mb-2 text-right">الأسبوع</label>
+                                                                    <select
+                                                                        className="w-full p-3 rounded-xl border border-slate-200"
+                                                                        value={importConfig.week}
+                                                                        onChange={e => setImportConfig({ ...importConfig, week: e.target.value })}
+                                                                    >
+                                                                        {Array.from({ length: 20 }, (_, i) => i + 1).map(week => (
+                                                                            <option key={week} value={week}>الأسبوع {week}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="relative border-2 border-dashed border-slate-200 rounded-2xl p-8 hover:bg-slate-50 transition-all cursor-pointer group">
+                                                                <input
+                                                                    type="file"
+                                                                    accept=".js,.json,.txt"
+                                                                    onChange={(e) => {
+                                                                        if (!importConfig.grade_id || !importConfig.master_subject_id) {
+                                                                            alert('يرجى اختيار المادة والصف أولاً')
+                                                                            e.target.value = null
+                                                                            return
+                                                                        }
+                                                                        const file = e.target.files[0]
+                                                                        if (file) {
+                                                                            const reader = new FileReader()
+                                                                            reader.onload = (event) => handleImportQuestions(event.target.result)
+                                                                            reader.readAsText(file)
+                                                                        }
+                                                                    }}
+                                                                    className="absolute inset-0 opacity-0 cursor-pointer"
+                                                                />
+                                                                <div className="text-center">
+                                                                    <div className="text-3xl mb-2 group-hover:scale-110 transition-transform">📂</div>
+                                                                    <div className="text-sm font-bold text-slate-600">اضغط لرفع ملف الأسئلة</div>
+                                                                    <div className="text-xs text-slate-400 mt-1">JS / JSON</div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex justify-end gap-3">
+                                                            <button
+                                                                onClick={() => setShowImportQuestionsModal(false)}
+                                                                className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
+                                                            >
+                                                                إلغاء
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+                                        {/* Edit Competition Modal */}
+                                        {
+                                            editingCompetition && (
+                                                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+                                                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl p-8 animate-in zoom-in duration-200 my-8">
+                                                        <div className="flex justify-between items-start mb-6">
+                                                            <button onClick={() => setEditingCompetition(null)} className="text-slate-400 hover:text-slate-600 p-2 bg-slate-50 rounded-xl transition-all">✕</button>
+                                                            <div className="text-right">
+                                                                <h3 className="text-2xl font-black text-slate-800">تعديل المسابقة</h3>
+                                                                <p className="text-slate-500 text-sm font-bold">قم بتعديل بيانات المسابقة</p>
+                                                            </div>
+                                                        </div>
+
+                                                        <form onSubmit={handleUpdateCompetition} className="space-y-6">
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+                                                                <div className="md:col-span-2 lg:col-span-2">
+                                                                    <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">عنوان المسابقة</label>
+                                                                    <input
+                                                                        type="text" placeholder="مثال: مسابقة العباقرة - الأسبوع الأول" required
+                                                                        value={editingCompetition.title} onChange={e => setEditingCompetition({ ...editingCompetition, title: e.target.value })}
+                                                                        className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold"
+                                                                    />
+                                                                </div>
+                                                                <div className="lg:col-span-1">
+                                                                    <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">الصف الدراسي</label>
+                                                                    <select
+                                                                        required value={editingCompetition.grade_id} onChange={e => setEditingCompetition({ ...editingCompetition, grade_id: e.target.value })}
+                                                                        className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
+                                                                    >
+                                                                        <option value="">اختر الصف</option>
+                                                                        {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                                                                    </select>
+                                                                </div>
+                                                                <div className="lg:col-span-1">
+                                                                    <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">المادة</label>
+                                                                    <select
+                                                                        required value={editingCompetition.subject_id} onChange={e => setEditingCompetition({ ...editingCompetition, subject_id: e.target.value })}
+                                                                        className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
+                                                                    >
+                                                                        <option value="">اختر المادة</option>
+                                                                        {subjects.filter(s => s.grade_id === editingCompetition.grade_id).map(s => (
+                                                                            <option key={s.id} value={s.id}>{s.master_subjects?.name}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                </div>
+                                                                <div className="lg:col-span-1">
+                                                                    <label className="block text-xs font-bold text-slate-400 mb-2 mr-2">الترم</label>
+                                                                    <select
+                                                                        value={editingCompetition.term} onChange={e => setEditingCompetition({ ...editingCompetition, term: parseInt(e.target.value) })}
+                                                                        className="w-full p-4 rounded-xl border border-slate-200 bg-white font-bold"
+                                                                    >
+                                                                        <option value={1}>الترم 1</option>
+                                                                        <option value={2}>الترم 2</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div className="lg:col-span-1">
+                                                                    <div className="grid grid-cols-2 gap-2">
+                                                                        <div>
+                                                                            <label className="block text-[10px] font-bold text-slate-400 mb-2 mr-2">من أسبوع</label>
+                                                                            <input
+                                                                                type="number" min="1" max="20"
+                                                                                value={editingCompetition.start_week} onChange={e => setEditingCompetition({ ...editingCompetition, start_week: parseInt(e.target.value) })}
+                                                                                className="w-full p-4 px-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
+                                                                            />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="block text-[10px] font-bold text-slate-400 mb-2 mr-2">إلى أسبوع</label>
+                                                                            <input
+                                                                                type="number" min="1" max="20"
+                                                                                value={editingCompetition.end_week} onChange={e => setEditingCompetition({ ...editingCompetition, end_week: parseInt(e.target.value) })}
+                                                                                className="w-full p-4 px-2 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-center"
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Quotas Section */}
+                                                            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                                                                <h4 className="text-sm font-black text-slate-500 mb-4 flex items-center gap-2">
+                                                                    <span>📊</span> توزيع صعوبة الأسئلة (الكيوتة)
+                                                                </h4>
+                                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                                    {[
+                                                                        { key: 'easy_q', label: 'سهل (Easy)', color: 'green', diff: 'easy' },
+                                                                        { key: 'medium_q', label: 'متوسط (Medium)', color: 'blue', diff: 'medium' },
+                                                                        { key: 'hard_q', label: 'صعب (Hard)', color: 'rose', diff: 'hard' },
+                                                                        { key: 'talented_q', label: 'متفوقين (Talented)', color: 'purple', diff: 'talented' }
+                                                                    ].map(item => {
+                                                                        const available = getAvailableQuestions(item.diff, editingCompetition);
+                                                                        const requested = editingCompetition[item.key];
+                                                                        const isExceeded = requested > available;
+                                                                        return (
+                                                                            <div key={item.key}>
+                                                                                <label className={`block text-[10px] font-bold text-${item.color}-600 mb-1 mr-1`}>{item.label}</label>
+                                                                                <input
+                                                                                    type="number" min="0"
+                                                                                    value={requested}
+                                                                                    onChange={e => setEditingCompetition({ ...editingCompetition, [item.key]: parseInt(e.target.value) || 0 })}
+                                                                                    className={`w-full p-3 rounded-xl border ${isExceeded ? 'border-red-500 bg-red-50' : 'border-slate-200'} text-center font-bold`}
+                                                                                />
+                                                                                <div className={`mt-1 text-[9px] font-bold text-right px-1 ${isExceeded ? 'text-red-600' : 'text-slate-400'}`}>
+                                                                                    متاح: {available} {isExceeded && '(غير كافٍ)'}
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                                <div className="mt-4 text-[10px] text-slate-400 italic font-bold">
+                                                                    إجمالي الأسئلة: {editingCompetition.easy_q + editingCompetition.medium_q + editingCompetition.hard_q + editingCompetition.talented_q} سؤال سيتم اختيارها عشوائياً لكل طالب.
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Timer & Attempts Section */}
+                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                                                <div className="bg-amber-50 p-6 rounded-2xl border border-amber-100">
+                                                                    <h4 className="text-sm font-black text-amber-700 mb-4 flex items-center gap-2">
+                                                                        <span>⏱️</span> نظام التوقيت
+                                                                    </h4>
+                                                                    <div className="space-y-3">
+                                                                        <label className="flex items-center gap-2 cursor-pointer">
+                                                                            <input type="radio" name="edit_timer_type" value="total" checked={editingCompetition.timer_type === 'total'} onChange={e => setEditingCompetition({ ...editingCompetition, timer_type: e.target.value })} className="accent-amber-600" />
+                                                                            <span className="text-xs font-bold text-amber-900">وقت كلي للمسابقة</span>
+                                                                        </label>
+                                                                        <label className="flex items-center gap-2 cursor-pointer">
+                                                                            <input type="radio" name="edit_timer_type" value="per_question" checked={editingCompetition.timer_type === 'per_question'} onChange={e => setEditingCompetition({ ...editingCompetition, timer_type: e.target.value })} className="accent-amber-600" />
+                                                                            <span className="text-xs font-bold text-amber-900">وقت محدد لكل سؤال</span>
+                                                                        </label>
+                                                                        <div className="mt-4">
+                                                                            <label className="block text-[10px] font-bold text-amber-600 mb-1 mr-1">
+                                                                                {editingCompetition.timer_type === 'total' ? 'المدة الكلية (بالدقائق)' : 'وقت السؤال الواحد (بالدقائق)'}
+                                                                            </label>
+                                                                            <input
+                                                                                type="number"
+                                                                                value={Math.floor(editingCompetition.duration / 60)}
+                                                                                onChange={e => {
+                                                                                    const mins = parseInt(e.target.value) || 0;
+                                                                                    setEditingCompetition({ ...editingCompetition, duration: mins * 60 });
+                                                                                }}
+                                                                                className="w-full p-3 rounded-xl border border-amber-200 bg-white text-center font-bold text-amber-900"
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className="md:col-span-2 bg-slate-50 p-6 rounded-2xl border border-slate-100 flex flex-col justify-between">
+                                                                    <div>
+                                                                        <h4 className="text-sm font-black text-slate-700 mb-4 flex items-center gap-2">
+                                                                            <span>🔄</span> إعدادات المحاولات
+                                                                        </h4>
+                                                                        <div className="flex items-center gap-4">
+                                                                            <div className="flex-1">
+                                                                                <label className="block text-[10px] font-bold text-slate-400 mb-1 mr-1">الحد الأقصى للمحاولات</label>
+                                                                                <input type="number" min="1" value={editingCompetition.max_attempts} onChange={e => setEditingCompetition({ ...editingCompetition, max_attempts: parseInt(e.target.value) })} className="w-full p-4 rounded-xl border border-slate-200 text-center font-black text-slate-800" />
+                                                                            </div>
+                                                                            <p className="flex-1 text-xs text-slate-400 leading-tight">
+                                                                                يتحكم هذا الخيار في عدد المرات التي يسمح فيها للطالب بدخول هذه المسابقة.
+                                                                            </p>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex gap-3 mt-6">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setEditingCompetition(null)}
+                                                                            className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
+                                                                        >
+                                                                            إلغاء
+                                                                        </button>
+                                                                        <button type="submit" className="flex-1 py-4 bg-brand-primary text-white rounded-xl font-black shadow-lg hover:scale-[1.01] transition-all flex items-center justify-center gap-3">
+                                                                            <span>💾</span> حفظ التعديلات
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </form>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+                                        {/* Competition Results Modal */}
+                                        {
+                                            showResultsModal && selectedCompetitionResults && (
+                                                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl p-8 animate-in zoom-in duration-200 overflow-y-auto max-h-[90vh]">
+                                                        <div className="flex justify-between items-start mb-6">
+                                                            <button onClick={() => setShowResultsModal(false)} className="text-slate-400 hover:text-slate-600 p-2 bg-slate-50 rounded-xl transition-all">✕</button>
+                                                            <div className="text-right">
+                                                                <h3 className="text-2xl font-black text-slate-800">نتائج المسابقة: {selectedCompetitionResults.title}</h3>
+                                                                <p className="text-slate-500 font-bold">الصف: {selectedCompetitionResults.grades?.name} | المادة: {selectedCompetitionResults.subjects?.master_subjects?.name}</p>
+                                                            </div>
+                                                        </div>
+
+                                                        <Leaderboard competitionId={selectedCompetitionResults.id} />
+
+                                                        <div className="mt-8 flex justify-end">
+                                                            <button
+                                                                onClick={() => setShowResultsModal(false)}
+                                                                className="px-8 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
+                                                            >
+                                                                إغلاق
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+
+                                        {/* Security Verification Modal */}
+                                        {
+                                            showVerifyModal && (
+                                                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+                                                    <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-sm p-8 text-center border border-slate-100 animate-in zoom-in duration-300">
+                                                        <div className="w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                                                            <span className="text-4xl">🔐</span>
+                                                        </div>
+                                                        <h3 className="text-2xl font-black text-slate-800 mb-2">تأكيد الهوية</h3>
+                                                        <p className="text-slate-500 text-sm mb-8 leading-relaxed">
+                                                            يرجى إدخال كلمة المرور الحالية لمدير النظام لتأكيد هذه العملية الحساسة.
+                                                        </p>
+
+                                                        <input
+                                                            type="password"
+                                                            autoFocus
+                                                            value={verifyPasswordValue}
+                                                            onChange={e => setVerifyPasswordValue(e.target.value)}
+                                                            onKeyDown={e => e.key === 'Enter' && handleVerifySecurityChallenge()}
+                                                            placeholder="كلمة المرور الحالية"
+                                                            className="w-full p-5 bg-slate-50 rounded-2xl border-2 border-slate-100 outline-none focus:border-brand-primary transition-all text-center text-lg mb-6"
+                                                        />
+
+                                                        <div className="flex flex-col gap-3">
+                                                            <button
+                                                                onClick={handleVerifySecurityChallenge}
+                                                                className="w-full py-4 bg-brand-primary text-white rounded-2xl font-black shadow-lg shadow-brand-primary/20 hover:scale-[1.02] active:scale-95 transition-all"
+                                                            >
+                                                                تأكيد وإرسال
+                                                            </button>
+                                                            <button
+                                                                onClick={() => { setShowVerifyModal(false); setVerifyCallback(null); }}
+                                                                className="w-full py-4 text-slate-400 font-bold hover:text-slate-600 transition-all"
+                                                            >
+                                                                إلغاء العملية
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+
+
+                                        {/* Poll Details Modal */}
+                                        {
+                                            showPollDetailsModal && (
+                                                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto">
+                                                    <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-4xl p-8 animate-in zoom-in duration-300 relative max-h-[90vh] flex flex-col">
+                                                        <button
+                                                            onClick={() => setShowPollDetailsModal(null)}
+                                                            className="absolute top-6 left-6 text-slate-400 hover:text-slate-600 transition-all text-xl"
+                                                        >
+                                                            ✕
+                                                        </button>
+
+                                                        <div className="mb-6 text-right">
+                                                            <h2 className="text-2xl font-black text-slate-800 mb-2">{showPollDetailsModal.question}</h2>
+                                                            <p className="text-slate-500 font-bold">تفاصيل الطلاب الذين قاموا بالتصويت</p>
+                                                        </div>
+
+                                                        <div className="overflow-y-auto flex-1 pr-2">
+                                                            <table className="w-full text-right">
+                                                                <thead className="sticky top-0 bg-white z-10 border-b-2 border-slate-100">
+                                                                    <tr className="text-slate-400 text-xs font-black uppercase tracking-wider">
+                                                                        <th className="p-4">اسم الطالب</th>
+                                                                        <th className="p-4">المدرسة</th>
+                                                                        <th className="p-4">الاختيار</th>
+                                                                        <th className="p-4">وقت التصويت</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-slate-50">
+                                                                    {pollResponses
+                                                                        .filter(r => r.poll_id === showPollDetailsModal.id)
+                                                                        .map((resp, i) => (
+                                                                            <tr key={i} className="hover:bg-slate-50 transition-all">
+                                                                                <td className="p-4 font-bold text-slate-700">{resp.students?.name || 'طالب غير معروف'}</td>
+                                                                                <td className="p-4 text-xs text-slate-500">{resp.students?.schools?.name || '---'}</td>
+                                                                                <td className="p-4">
+                                                                                    <span className="px-3 py-1 bg-brand-primary/10 text-brand-primary rounded-lg font-black text-xs">
+                                                                                        {showPollDetailsModal.options[resp.option_index]}
+                                                                                    </span>
+                                                                                </td>
+                                                                                <td className="p-4 text-xs text-slate-400 font-mono">
+                                                                                    {new Date(resp.created_at).toLocaleString('ar-EG')}
+                                                                                </td>
+                                                                            </tr>
+                                                                        ))}
+                                                                    {pollResponses.filter(r => r.poll_id === showPollDetailsModal.id).length === 0 && (
+                                                                        <tr>
+                                                                            <td colSpan="4" className="p-12 text-center text-slate-400 italic">لا توجد ردود مسجلة لهذا التصويت بعد.</td>
+                                                                        </tr>
+                                                                    )}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+                                    </main>
+                                </div>
+                            </div>
+        </div>
     )
 }
 
