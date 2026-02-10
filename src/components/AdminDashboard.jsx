@@ -160,6 +160,68 @@ function AdminDashboard({ user, onLogout }) {
         }
     }
 
+    // Delete Question Handler
+    const handleDeleteQuestion = async (questionId) => {
+        if (!window.confirm('هل أنت متأكد من حذف هذا السؤال نهائياً؟')) return;
+
+        try {
+            const { error } = await supabase
+                .from('questions')
+                .delete()
+                .eq('id', questionId);
+
+            if (error) throw error;
+
+            setAllQuestions(allQuestions.filter(q => q.id !== questionId));
+            setPreviewQuestion(null); // Close preview if open
+            alert('تم حذف السؤال بنجاح');
+        } catch (error) {
+            console.error('Error deleting question:', error);
+            alert('حدث خطأ أثناء حذف السؤال');
+        }
+    };
+
+    const handleUpdateQuestion = async (e) => {
+        e.preventDefault()
+        try {
+            // Ensure options array exists and has 4 elements if needed, though UI should handle it.
+            // The editingQuestion state should already have the updated structure from the UI.
+
+            const { error } = await supabase
+                .from('questions')
+                .update({
+                    content: editingQuestion.content,
+                    subject_id: editingQuestion.subject_id,
+                    grade_id: editingQuestion.grade_id,
+                    difficulty: editingQuestion.difficulty,
+                    term: editingQuestion.term
+                    // correct_answer is updated via Preview Modal as per user request flow
+                })
+                .eq('id', editingQuestion.id)
+
+            if (error) throw error
+
+            // Update local state
+            const updatedQ = { ...editingQuestion };
+            setAllQuestions(allQuestions.map(q => q.id === editingQuestion.id ? updatedQ : q))
+
+            // Check if currently previewed question is the one being edited (shouldn't happen in this flow usually, but good for safety)
+            if (previewQuestion && previewQuestion.id === editingQuestion.id) {
+                setPreviewQuestion(updatedQ)
+            } else {
+                // Re-open/Update Preview Modal with the edited question to allow Correct Answer selection
+                setPreviewQuestion(updatedQ);
+            }
+
+            setEditingQuestion(null)
+            alert('تم تحديث بيانات السؤال بنجاح. يرجى "معاينة" السؤال لتحديد الإجابة الصحيحة إذا لزم الأمر.')
+
+        } catch (error) {
+            console.error('Error updating question:', error)
+            alert('حدث خطأ أثناء تحديث السؤال')
+        }
+    }
+
     const handleAuditQuestion = async (question, status) => {
         try {
             const { error } = await supabase
@@ -3421,8 +3483,34 @@ function AdminDashboard({ user, onLogout }) {
                                                                         ...editingQuestion,
                                                                         content: { ...editingQuestion.content, question: e.target.value }
                                                                     })}
-                                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary h-24"
+                                                                    className="w-full p-4 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary h-24 font-bold text-slate-700"
                                                                 />
+                                                            </div>
+
+                                                            {/* Options Editing */}
+                                                            <div className="space-y-3">
+                                                                <label className="block text-sm font-bold text-slate-500 mb-2">الخيارات (الإجابات)</label>
+                                                                {Array.from({ length: 4 }).map((_, index) => (
+                                                                    <div key={index} className="flex items-center gap-3">
+                                                                        <span className="w-8 h-8 flex items-center justify-center bg-slate-100 rounded-lg text-slate-500 font-bold">{index + 1}</span>
+                                                                        <input
+                                                                            type="text"
+                                                                            value={editingQuestion.content?.options?.[index] || ''}
+                                                                            onChange={e => {
+                                                                                const newOptions = [...(editingQuestion.content?.options || [])];
+                                                                                // Ensure array has 4 elements if not already
+                                                                                while (newOptions.length < 4) newOptions.push('');
+                                                                                newOptions[index] = e.target.value;
+                                                                                setEditingQuestion({
+                                                                                    ...editingQuestion,
+                                                                                    content: { ...editingQuestion.content, options: newOptions }
+                                                                                });
+                                                                            }}
+                                                                            placeholder={`الخيار ${index + 1}`}
+                                                                            className="flex-1 p-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-brand-primary font-bold text-slate-700"
+                                                                        />
+                                                                    </div>
+                                                                ))}
                                                             </div>
 
                                                             <div className="grid grid-cols-2 gap-4">
@@ -3510,14 +3598,31 @@ function AdminDashboard({ user, onLogout }) {
                                                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                                                     <div className="bg-white rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col">
                                                         {/* Modal Header */}
-                                                        <div className="p-6 border-b border-slate-100 flex justify-between items-center sticky top-0 bg-white z-10">
+                                                        <div className="p-6 border-b border-slate-100 flex justify-between items-center sticky top-0 bg-white z-10 w-full">
                                                             <div>
                                                                 <h3 className="text-2xl font-black text-slate-800">معاينة السؤال (طالب)</h3>
                                                                 <p className="text-sm text-slate-500 mt-1">هكذا سيظهر السؤال للطالب في المسابقة</p>
                                                             </div>
-                                                            <button onClick={() => setPreviewQuestion(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-                                                                ❌
-                                                            </button>
+                                                            <div className="flex items-center gap-2">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setEditingQuestion(previewQuestion);
+                                                                        setPreviewQuestion(null); // Close preview to open edit
+                                                                    }}
+                                                                    className="px-4 py-2 bg-blue-100 text-blue-700 rounded-xl font-bold hover:bg-blue-200 transition-colors flex items-center gap-2"
+                                                                >
+                                                                    ✏️ تعديل
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleDeleteQuestion(previewQuestion.id)}
+                                                                    className="px-4 py-2 bg-red-100 text-red-700 rounded-xl font-bold hover:bg-red-200 transition-colors flex items-center gap-2"
+                                                                >
+                                                                    🗑️ حذف
+                                                                </button>
+                                                                <button onClick={() => setPreviewQuestion(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-xl">
+                                                                    ❌
+                                                                </button>
+                                                            </div>
                                                         </div>
 
                                                         {/* Modal Body - Student View Simulation */}
