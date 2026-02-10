@@ -2985,13 +2985,13 @@ function AdminDashboard({ user, onLogout }) {
                                                 <label className="block text-sm font-bold text-slate-500 mb-3 text-right">نص السؤال</label>
                                                 {/* Formatted Preview */}
                                                 <div
-                                                    className="w-full p-4 rounded-xl bg-blue-50 border border-blue-200 font-bold text-slate-700 text-right mb-3 min-h-[60px] text-xl leading-relaxed"
+                                                    className="w-full p-4 rounded-xl bg-blue-50 border border-blue-200 font-bold text-slate-700 text-right mb-3 min-h-[60px] text-2xl leading-relaxed"
                                                     dir="rtl"
                                                     dangerouslySetInnerHTML={{ __html: convertMathToLatex(previewQuestion.question || '') }}
                                                 />
                                                 {/* Editable Textarea */}
                                                 <textarea
-                                                    className="w-full p-4 rounded-xl bg-white border border-slate-200 font-bold text-slate-700 text-right focus:ring-2 focus:ring-blue-100 min-h-[100px] text-xl leading-relaxed"
+                                                    className="w-full p-4 rounded-xl bg-white border border-slate-200 font-bold text-slate-700 text-right focus:ring-2 focus:ring-blue-100 min-h-[100px] text-2xl leading-relaxed"
                                                     value={previewQuestion.question || ''}
                                                     onChange={(e) => handleUpdateQuestionField(previewQuestion, 'question', e.target.value)}
                                                     dir="rtl"
@@ -3017,13 +3017,13 @@ function AdminDashboard({ user, onLogout }) {
                                                             </div>
                                                             {/* Formatted Preview */}
                                                             <div
-                                                                className={`w-full p-3 rounded-xl border font-bold text-slate-700 text-right text-lg mb-2 min-h-[40px] leading-relaxed ${isCorrect ? 'bg-green-100 border-green-200' : 'bg-blue-50 border-blue-200'}`}
+                                                                className={`w-full p-3 rounded-xl border font-bold text-slate-700 text-right text-xl mb-2 min-h-[40px] leading-relaxed ${isCorrect ? 'bg-green-100 border-green-200' : 'bg-blue-50 border-blue-200'}`}
                                                                 dir="rtl"
                                                                 dangerouslySetInnerHTML={{ __html: convertMathToLatex(previewQuestion[choiceKey] || '') }}
                                                             />
                                                             {/* Editable Textarea */}
                                                             <textarea
-                                                                className="w-full p-3 rounded-xl bg-slate-50 border-none font-bold text-slate-700 text-right text-base focus:ring-2 focus:ring-blue-100"
+                                                                className="w-full p-3 rounded-xl bg-slate-50 border-none font-bold text-slate-700 text-right text-lg focus:ring-2 focus:ring-blue-100"
                                                                 value={previewQuestion[choiceKey] || ''}
                                                                 onChange={(e) => handleUpdateQuestionField(previewQuestion, choiceKey, e.target.value)}
                                                                 rows="2"
