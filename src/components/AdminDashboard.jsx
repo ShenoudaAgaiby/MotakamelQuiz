@@ -444,6 +444,7 @@ function AdminDashboard({ user, onLogout }) {
             }
 
             if (newUser.role === 'student') {
+                payload.grade_id = newUser.grade_id
                 payload.grade = grades.find(g => g.id === newUser.grade_id)?.name || ''
                 payload.class_name = newUser.class_name
             } else {
@@ -1042,11 +1043,15 @@ function AdminDashboard({ user, onLogout }) {
             if (nameIdx === -1) throw new Error('الملف يجب أن يحتوي على عمود الاسم (name)')
 
             const studentsToInsert = dataRows.map(row => {
+                const gradeName = row[gradeIdx] || ''
+                const matchedGrade = grades.find(g => g.name === gradeName || g.educational_phases?.name + ' - ' + g.name === gradeName)
+
                 return {
                     school_id: targetSchoolId,
                     name: row[nameIdx],
                     student_code: row[codeIdx] || generateSchoolCode(),
-                    grade: row[gradeIdx] || '',
+                    grade: gradeName,
+                    grade_id: matchedGrade ? matchedGrade.id : null,
                     class_name: row[classIdx] || ''
                 }
             })

@@ -220,7 +220,7 @@ function StudentDashboard({ user, onLogout }) {
                 <header className="flex justify-between items-center mb-8 glass-card p-6 rounded-2xl">
                     <div>
                         <h1 className="text-2xl font-bold text-brand-primary">لوحة الطالب 🎓</h1>
-                        <p className="text-slate-600">أهلاً بك، {user.name} | {user.schoolName || 'المدرسة النموذجية'}</p>
+                        <p className="text-slate-600">أهلاً بك، {user.name} | {user.grades?.name || '...'} - {user.class_name || '...'} | {user.schoolName || 'المدرسة النموذجية'}</p>
                     </div>
                     <button
                         onClick={onLogout}
