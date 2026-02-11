@@ -158,8 +158,8 @@ function TeacherDashboard({ user, onLogout }) {
         if (activeView === 'audited' && !q.is_audited) return false
         if (activeView === 'unaudited' && q.is_audited) return false
 
-        // Apply extra filters ONLY for 'audited' view (as requested)
-        if (activeView === 'audited') {
+        // Apply extra filters for 'audited' or 'unaudited' views
+        if (activeView === 'audited' || activeView === 'unaudited') {
             if (filters.grade && q.grade_id !== filters.grade) return false
             if (filters.term && q.term !== parseInt(filters.term)) return false
             if (filters.difficulty && q.difficulty !== filters.difficulty) return false
@@ -255,8 +255,8 @@ function TeacherDashboard({ user, onLogout }) {
                                         </span>
                                     </div>
 
-                                    {/* Filters Bar - Only for Audited Questions */}
-                                    {activeView === 'audited' && (
+                                    {/* Filters Bar - For Audited or Unaudited Questions */}
+                                    {(activeView === 'audited' || activeView === 'unaudited') && (
                                         <div className="flex flex-wrap gap-2 items-center">
                                             <div className="relative">
                                                 <input

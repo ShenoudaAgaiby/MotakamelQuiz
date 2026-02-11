@@ -302,7 +302,7 @@ function StudentDashboard({ user, onLogout }) {
                 <section className="glass-card rounded-2xl overflow-hidden mb-8">
                     <div className="p-6 border-b border-slate-100 bg-brand-primary/5">
                         <h2 className="text-xl font-bold flex items-center gap-2">
-                            <span>🏆</span> المسابقات الرسمية المتاحة (الصف {user.grades?.name || '...'})
+                            <span>🏆</span> المسابقات الرسمية المتاحة ({user.grades?.name || '...'})
                         </h2>
                     </div>
                     <div className="divide-y divide-slate-100">
