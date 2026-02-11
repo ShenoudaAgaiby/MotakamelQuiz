@@ -32,6 +32,13 @@ function Leaderboard({ schoolId, competitionId }) {
                         grades!grade_id(name),
                         class_name,
                         school_id
+                    ),
+                    competitions!competition_id (
+                        title,
+                        easy_q,
+                        medium_q,
+                        hard_q,
+                        talented_q
                     )
                 `)
 
@@ -179,7 +186,16 @@ function Leaderboard({ schoolId, competitionId }) {
                                         <div className="text-[10px] text-brand-primary font-bold">{result.students?.class_name || 'بدون فصل'}</div>
                                     </td>
                                     <td className="px-6 py-4 font-black text-brand-primary">
-                                        {result.score} {mode === 'competition' && <span className="text-[10px] text-slate-400">/ {result.total_questions}</span>}
+                                        {result.score} {mode === 'competition' && (() => {
+                                            const comp = result.competitions;
+                                            const totalScore = comp ?
+                                                ((comp.easy_q || 0) * 1) +
+                                                ((comp.medium_q || 0) * 2) +
+                                                ((comp.hard_q || 0) * 3) +
+                                                ((comp.talented_q || 0) * 4)
+                                                : result.total_questions;
+                                            return <span className="text-[10px] text-slate-400">/ {totalScore}</span>
+                                        })()}
                                     </td>
                                     <td className="px-6 py-4 text-center font-mono text-xs font-bold text-slate-500">
                                         {mode === 'competition'

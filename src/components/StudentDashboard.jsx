@@ -185,11 +185,8 @@ function StudentDashboard({ user, onLogout }) {
             const shuffled = selectedQuestions.sort(() => 0.5 - Math.random())
 
             setActiveCompetition({
-                id: comp.id,
-                title: comp.title,
-                questions: shuffled,
-                timer_type: comp.timer_type,
-                duration: comp.duration
+                ...comp,
+                questions: shuffled
             })
         } catch (err) {
             console.error('Error starting competition:', err)

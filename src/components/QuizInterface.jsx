@@ -72,7 +72,14 @@ function QuizInterface({ questions: legacyQuestions, competition, user, onComple
 
         let score = 0
         questions.forEach((q, index) => {
-            if (answers[index] === q.correct_answer) {
+            const selectedText = answers[index];
+            const options = q.content?.options || [];
+            const selectedIdx = options.indexOf(selectedText);
+            const selectedLetter = selectedIdx !== -1 ? ['A', 'B', 'C', 'D'][selectedIdx] : null;
+
+
+
+            if (selectedText === q.correct_answer || (selectedLetter && selectedLetter === q.correct_answer)) {
                 score += (q.score || 1)
             }
         })
@@ -111,17 +118,57 @@ function QuizInterface({ questions: legacyQuestions, competition, user, onComple
     }
 
     if (isFinished) {
-        const score = questions.reduce((acc, q, i) => answers[i] === q.correct_answer ? acc + (q.score || 1) : acc, 0)
-        const totalPoints = questions.reduce((acc, q) => acc + (q.score || 1), 0)
+        // Calculate Score Robustly
+        const score = questions.reduce((acc, q, i) => {
+            const selectedText = answers[i];
+            if (!selectedText) return acc;
+
+            const options = q.content?.options || [];
+            const selectedIdx = options.indexOf(selectedText);
+            const selectedLetter = selectedIdx !== -1 ? ['A', 'B', 'C', 'D'][selectedIdx] : null;
+
+            if (selectedText === q.correct_answer || (selectedLetter && selectedLetter === q.correct_answer)) {
+                if (isCompetition) {
+                    const diff = q.difficulty;
+                    if (diff === 'easy') return acc + 1;
+                    if (diff === 'medium') return acc + 2;
+                    if (diff === 'hard') return acc + 3;
+                    if (diff === 'talented' || diff === 'متفوقين') return acc + 4;
+                }
+                return acc + (Number(q.score) || 1);
+            }
+            return acc;
+        }, 0);
+
+        // Calculate Total Points Robustly
+        // Calculate Total Points Robustly based on Question Difficulty
+        const totalPoints = questions.reduce((acc, q) => {
+            if (isCompetition) {
+                const diff = q.difficulty;
+                // Normalize difficulty keys
+                if (diff === 'easy') return acc + 1;
+                if (diff === 'medium') return acc + 2;
+                if (diff === 'hard') return acc + 3;
+                if (diff === 'talented' || diff === 'متفوقين') return acc + 4;
+                return acc + (Number(q.score) || 1);
+            }
+            return acc + (Number(q.score) || 1);
+        }, 0);
+
         return (
-            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 ltr">
                 <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center shadow-2xl">
                     <div className="text-6xl mb-4">🎊</div>
                     <h2 className="text-2xl font-bold mb-2 text-slate-800">أحسنت يا {user.name}!</h2>
-                    <p className="text-slate-600 mb-6 font-bold">{isCompetition ? `لقد أكملت "${competition.title}"` : 'لقد أتممت التدريب بنجاح.'}</p>
+                    <p className="text-slate-600 mb-6 font-bold">{isCompetition && competition.title ? `لقد أكملت "${competition.title}"` : 'لقد أتممت التدريب بنجاح.'}</p>
+
                     <div className="bg-slate-50 rounded-2xl p-6 mb-8">
-                        <div className="text-sm text-slate-500 mb-1">درجتك النهائية</div>
-                        <div className="text-4xl font-black text-brand-primary">{score} / {totalPoints}</div>
+                        <div className="text-sm text-slate-500 mb-2 font-bold">درجتك النهائية</div>
+                        <div className="flex justify-center items-center gap-2 dir-ltr">
+                            <span className="text-4xl font-black text-brand-primary">{score}</span>
+                            <span className="text-4xl font-black text-slate-300">/</span>
+                            <span className="text-4xl font-black text-slate-600">{totalPoints}</span>
+                        </div>
                     </div>
                     <button
                         onClick={() => onComplete({ score, total: questions.length })}
@@ -186,6 +233,39 @@ function QuizInterface({ questions: legacyQuestions, competition, user, onComple
                         <span className="px-3 py-1 bg-slate-100 text-slate-700 rounded-lg text-sm font-black border border-slate-200 shadow-sm">
                             الدرجة: {currentQuestion.score || 1}
                         </span>
+                        {isCompetition && (
+                            <>
+                                <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-sm font-black border border-green-200 shadow-sm flex items-center gap-1">
+                                    <span>درجتك:</span>
+                                    <span className="font-bold">
+                                        {questions.reduce((acc, q, idx) => {
+                                            if (idx < currentIndex || (idx === currentIndex && isCorrected)) {
+                                                const selectedText = answers[idx];
+                                                if (selectedText) {
+                                                    const options = q.content?.options || [];
+                                                    const selectedIdx = options.indexOf(selectedText);
+                                                    const selectedLetter = selectedIdx !== -1 ? ['A', 'B', 'C', 'D'][selectedIdx] : null;
+
+                                                    if (selectedText === q.correct_answer || (selectedLetter && selectedLetter === q.correct_answer)) {
+                                                        return acc + (Number(q.score) || 1);
+                                                    }
+                                                }
+                                            }
+                                            return acc;
+                                        }, 0)}
+                                    </span>
+                                </span>
+                                <span className="px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-sm font-black border border-amber-200 shadow-sm flex items-center gap-1">
+                                    <span>الدرجة الكلية:</span>
+                                    <span>
+                                        {((competition.easy_q || 0) * 1) +
+                                            ((competition.medium_q || 0) * 2) +
+                                            ((competition.hard_q || 0) * 3) +
+                                            ((competition.talented_q || 0) * 4)}
+                                    </span>
+                                </span>
+                            </>
+                        )}
                     </div>
                     {isCompetition && (
                         <span className="inline-block px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-sm font-black mb-4 border border-amber-200 shadow-sm">
@@ -205,7 +285,8 @@ function QuizInterface({ questions: legacyQuestions, competition, user, onComple
                 <div className="grid grid-cols-1 gap-4 mb-10 rtl">
                     {currentQuestion.content?.options?.map((option, idx) => {
                         const isSelected = answers[currentIndex] === option
-                        const isCorrect = option === currentQuestion.correct_answer
+                        const optionLetter = ['A', 'B', 'C', 'D'][idx]
+                        const isCorrect = option === currentQuestion.correct_answer || optionLetter === currentQuestion.correct_answer
 
                         let displayStyle = 'border-slate-100 bg-white hover:border-slate-200 hover:bg-slate-50'
                         let iconStyle = 'bg-slate-100 text-slate-400 group-hover:bg-slate-200'
@@ -236,7 +317,7 @@ function QuizInterface({ questions: legacyQuestions, competition, user, onComple
                                 className={`p-6 rounded-2xl border-2 text-right transition-all flex items-center gap-4 group ${displayStyle}`}
                             >
                                 <span className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-lg transition-colors ${iconStyle}`}>
-                                    {isCorrected && isCorrect ? '✓' : idx + 1}
+                                    {isCorrected ? (isCorrect ? '✓' : (isSelected ? '✗' : idx + 1)) : idx + 1}
                                 </span>
                                 <span className={`flex-1 text-lg font-bold ${textStyle}`}>
                                     {option}

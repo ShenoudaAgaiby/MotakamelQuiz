@@ -16,6 +16,7 @@ function AdminDashboard({ user, onLogout }) {
     const [searchTerm, setSearchTerm] = useState('')
     const [teacherSearch, setTeacherSearch] = useState('')
     const [studentSearch, setStudentSearch] = useState('')
+    const [questionSearch, setQuestionSearch] = useState('')
     const [allQuestions, setAllQuestions] = useState([])
     const [competitions, setCompetitions] = useState([])
     const [qFilters, setQFilters] = useState({ school: '', grade: '', subject: '', difficulty: '', term: '', week: '' })
@@ -900,7 +901,11 @@ function AdminDashboard({ user, onLogout }) {
         const termMatch = !qFilters.term || q.term === parseInt(qFilters.term)
         const weekMatch = !qFilters.week || q.content?.week === parseInt(qFilters.week)
         const auditedMatch = !qFilters.audited || (qFilters.audited === 'true' ? q.is_audited === true : q.is_audited !== true)
-        return schoolMatch && gradeMatch && subjectMatch && difficultyMatch && termMatch && weekMatch && auditedMatch
+
+        const searchLower = questionSearch.toLowerCase()
+        const contentMatch = !questionSearch || (q.content?.question && q.content.question.toLowerCase().includes(searchLower))
+
+        return schoolMatch && gradeMatch && subjectMatch && difficultyMatch && termMatch && weekMatch && auditedMatch && contentMatch
     })
 
     // Update MathJax when questions table is displayed
@@ -2122,6 +2127,19 @@ function AdminDashboard({ user, onLogout }) {
                                 </div>
                             </div>
 
+                            <div className="mb-6">
+                                <div className="relative w-full">
+                                    <input
+                                        type="text"
+                                        placeholder="بحث في نص الأسئلة..."
+                                        value={questionSearch}
+                                        onChange={e => setQuestionSearch(e.target.value)}
+                                        className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-brand-primary outline-none shadow-sm"
+                                    />
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
+                                </div>
+                            </div>
+
                             <div className="overflow-x-auto">
                                 <table className="w-full text-right text-sm">
                                     <thead className="bg-slate-50 text-slate-400 font-bold border-b">
@@ -2323,6 +2341,16 @@ function AdminDashboard({ user, onLogout }) {
                                                             <label className="block text-[10px] font-bold text-slate-400 mb-1 mr-1">الحد الأقصى للمحاولات</label>
                                                             <input type="number" min="1" value={newCompetition.max_attempts} onChange={e => setNewCompetition({ ...newCompetition, max_attempts: parseInt(e.target.value) })} className="w-full p-4 rounded-xl border border-slate-200 text-center font-black text-slate-800" />
                                                         </div>
+
+                                                        {/* Total Score Display */}
+                                                        <div className="flex-1 bg-amber-50 rounded-xl border border-amber-200 p-2 flex flex-col items-center justify-center h-full min-h-[82px]">
+                                                            <span className="text-[10px] font-bold text-amber-800 mb-1">درجة المسابقة الكلية</span>
+                                                            <span className="text-2xl font-black text-amber-600">
+                                                                {(newCompetition.easy_q * 1) + (newCompetition.medium_q * 2) + (newCompetition.hard_q * 3) + (newCompetition.talented_q * 4)}
+                                                            </span>
+                                                            <span className="text-[10px] text-amber-800/60">درجة</span>
+                                                        </div>
+
                                                         <p className="flex-1 text-xs text-slate-400 leading-tight">
                                                             يتحكم هذا الخيار في عدد المرات التي يسمح فيها للطالب بدخول هذه المسابقة.
                                                         </p>
@@ -3769,6 +3797,16 @@ function AdminDashboard({ user, onLogout }) {
                                                             <label className="block text-[10px] font-bold text-slate-400 mb-1 mr-1">الحد الأقصى للمحاولات</label>
                                                             <input type="number" min="1" value={editingCompetition.max_attempts} onChange={e => setEditingCompetition({ ...editingCompetition, max_attempts: parseInt(e.target.value) })} className="w-full p-4 rounded-xl border border-slate-200 text-center font-black text-slate-800" />
                                                         </div>
+
+                                                        {/* Total Score Display for Edit Modal */}
+                                                        <div className="flex-1 bg-amber-50 rounded-xl border border-amber-200 p-2 flex flex-col items-center justify-center h-full min-h-[82px] mx-2">
+                                                            <span className="text-[10px] font-bold text-amber-800 mb-1">درجة المسابقة الكلية</span>
+                                                            <span className="text-2xl font-black text-amber-600">
+                                                                {(editingCompetition.easy_q * 1) + (editingCompetition.medium_q * 2) + (editingCompetition.hard_q * 3) + (editingCompetition.talented_q * 4)}
+                                                            </span>
+                                                            <span className="text-[10px] text-amber-800/60">درجة</span>
+                                                        </div>
+
                                                         <p className="flex-1 text-xs text-slate-400 leading-tight">
                                                             يتحكم هذا الخيار في عدد المرات التي يسمح فيها للطالب بدخول هذه المسابقة.
                                                         </p>

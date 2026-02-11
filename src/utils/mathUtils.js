@@ -53,3 +53,15 @@ export function updateMathDisplay(element = null) {
         }
     }
 }
+
+/**
+ * دالة لتطبيع النصوص العربية لتسهيل البحث (إزالة الهمزات والتشكيل)
+ */
+export function normalizeArabic(text) {
+    if (!text) return "";
+    return text
+        .replace(/[أإآ]/g, "ا")
+        .replace(/ى/g, "ي")
+        .replace(/ة/g, "ه")
+        .replace(/[\u064B-\u0652]/g, ""); // إزالة التشكيل (الحركات)
+}
